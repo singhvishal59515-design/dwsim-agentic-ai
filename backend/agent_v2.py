@@ -9,6 +9,7 @@ Supports on_token streaming callback for the FastAPI SSE endpoint.
 import concurrent.futures
 import json
 import logging
+import re as _re
 import sys
 import textwrap
 import time
@@ -19,6 +20,68 @@ from llm_client      import LLMClient
 from tools_schema_v2 import DWSIM_TOOLS
 
 _log = logging.getLogger("agent_v2")
+
+# ── Gap 1: Prompt-injection defence ──────────────────────────────────────────
+# DWSIM object names (stream/unit-op tags) flow verbatim into the LLM context.
+# A malicious flowsheet could embed an instruction inside a tag name.
+# Scan every string that arrives from a tool result; replace suspicious content.
+_INJECTION_PATTERNS = _re.compile(
+    r"(?i)\b("
+    r"ignore\s+(previous|all|above|prior)\s+(instructions?|rules?|prompt)|"
+    r"disregard\s+(all|previous|the\s+above)\s+(instructions?|rules?)|"
+    r"forget\s+(all|everything|previous)\s+(instructions?|rules?)|"
+    r"you\s+are\s+now\s+(a\s+)?(?!a\s+chemical)|"   # "you are now a..." except legit role
+    r"new\s+(system\s+prompt|instructions?|role\s+is)|"
+    r"override\s+(the\s+)?(system\s+prompt|instructions?)|"
+    r"act\s+as\s+if\s+you\s+are|"
+    r"do\s+not\s+follow\s+(the\s+)?(rules?|instructions?)"
+    r")"
+)
+
+
+def _sanitize_for_llm(obj: Any, _depth: int = 0) -> Any:
+    """Recursively scan tool-result data for prompt-injection patterns.
+    Strings that match are replaced with a warning token so they never
+    instruct the model.  Depth-limited to avoid stack overflow on deeply
+    nested DWSIM data structures.
+    """
+    if _depth > 8:
+        return obj
+    if isinstance(obj, str):
+        if _INJECTION_PATTERNS.search(obj):
+            _log.warning("Prompt-injection pattern detected in tool result — blocked.")
+            return "[CONTENT_BLOCKED: possible prompt injection in tool output]"
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_llm(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_llm(item, _depth + 1) for item in obj]
+    return obj
+
+
+# ── Gap 2: Output content filter ─────────────────────────────────────────────
+# If the LLM makes unverified qualitative safety/hazard claims, append a
+# standard disclaimer so the user knows those claims weren't simulation-verified.
+_UNVERIFIED_SAFETY_RE = _re.compile(
+    r"(?i)\b("
+    r"safe\s+to\s+(heat|cool|pump|pressuri[sz]e|mix|store|handle|use\s+at)|"
+    r"safe\s+at\s+\d|"
+    r"safe\s+for\s+(human|worker|personnel|continuous\s+operation)|"
+    r"non[-\s]?toxic(?!\s+solvent)|"          # allow "non-toxic solvent" (common label)
+    r"not\s+(hazardous|dangerous|flammable|explosive|toxic)\s+at|"
+    r"no\s+risk\s+of\s+(explosion|fire|ignition|toxicity)|"
+    r"harmless\s+(at|below|under|when)|"
+    r"will\s+not\s+(explode|ignite|react\s+violently|decompose\s+dangerously)"
+    r")"
+)
+
+_SAFETY_DISCLAIMER = (
+    "\n\n---\n"
+    "*Safety note: The qualitative safety or hazard statements above have not "
+    "been verified by process simulation. Always consult a certified process "
+    "safety engineer and relevant safety data sheets (SDS) before acting on "
+    "safety-related conclusions.*"
+)
 
 # Per-tool wall-clock timeout. run_simulation is heavier than the rest.
 _DEFAULT_TOOL_TIMEOUT_S = 60.0
@@ -69,6 +132,29 @@ _LLM_RETRY_BUDGET_S = 180.0             # 3 minutes max across all attempts
 # For safety, trim at 80k chars (~20k tokens) to stay well under all providers.
 _MAX_HISTORY_MESSAGES = 30          # hard message count cap (fast path)
 _MAX_HISTORY_CHARS    = 80_000      # soft token cap — trim oldest if exceeded
+
+
+def _apply_output_filter(text: str) -> str:
+    """Append a safety disclaimer if the LLM response makes unverified hazard claims.
+    These claims come from the model's parametric knowledge, not simulation results,
+    so we flag them rather than silently passing them through.
+    """
+    if _UNVERIFIED_SAFETY_RE.search(text):
+        return text + _SAFETY_DISCLAIMER
+    return text
+
+
+# ── Gap 3: Physical property hard limits ─────────────────────────────────────
+# Applied in _run_tool() BEFORE the bridge call, so the .NET layer never sees
+# physically impossible values.  All values are compared in SI units after a
+# lightweight conversion that mirrors what DWSIMBridge._convert_to_si() does.
+_STREAM_PROP_SI_LIMITS: Dict[str, tuple] = {
+    "temperature":    (0.0,    2500.0),  # K   — absolute zero → ~2500 K industrial max
+    "pressure":       (0.0,    1.5e8),   # Pa  — vacuum → 1500 bar
+    "mass_flow":      (0.0,    1e9),     # kg/s
+    "molar_flow":     (0.0,    1e9),     # mol/s
+    "vapor_fraction": (0.0,    1.0),
+}
 
 
 # ── Tool call ordering state machine ─────────────────────────────────────────
@@ -697,6 +783,17 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     4. For recycle loops: call initialize_recycle before solving.
     5. Reduce complexity: simplify the flowsheet, solve partial sections.
 
+    REACT REASONING PATTERN (Reason → Act → Observe → Reason)
+    ────────────────────────────────────────────────────────────
+    Before EVERY tool call, state your reasoning briefly:
+      REASON: "I need to check the Tc of ethanol before choosing property package."
+      ACT: [call lookup_compound_properties]
+      OBSERVE: [read result]
+      REASON: "Tc=513.9K, polar compound — NRTL is correct."
+      ACT: [call new_flowsheet with NRTL]
+    This explicit reasoning prevents cascading errors and helps the user
+    understand your decisions. Keep each REASON to 1-2 sentences.
+
     {flowsheet_context}
 """).strip()
 
@@ -1265,6 +1362,7 @@ class DWSIMAgentV2:
                 else:
                     self._log(f"\nAgent ▶ {text_content[:400]}"
                               + ("…" if len(text_content) > 400 else ""))
+                text_content = _apply_output_filter(text_content)  # Gap 2: safety disclaimer
                 self._history.append({"role": "assistant",
                                       "content": text_content})
                 self._emit_turn_metrics(turn_t0, iteration, text_content)
@@ -1300,6 +1398,7 @@ class DWSIMAgentV2:
                     _tool_t0 = time.monotonic()
                     result = self._run_tool(name, tc.get("arguments"))
                     result = _compress_tool_result(name, result)
+                    result = _sanitize_for_llm(result)   # Gap 1: injection defence
                     # ── Auto-diagnosis on save_and_solve failure ──────────────
                     # When simulation fails to converge, automatically call
                     # check_convergence and validate_feed_specs so the LLM has
@@ -1726,12 +1825,97 @@ class DWSIMAgentV2:
                 coerced[k] = v   # keep original if coercion fails; let bridge handle it
         return coerced
 
+    def _validate_property_range(self, tool_name: str, arguments: dict) -> Optional[str]:
+        """Return an error string if a stream or unit-op property value is outside
+        its physical bounds, or None if the value is acceptable.
+
+        Converts to SI internally to handle all unit variants uniformly.
+        Mirrors the conversion logic in DWSIMBridge._convert_to_si().
+        """
+        try:
+            if tool_name == "set_stream_property":
+                prop = arguments.get("property_name", "")
+                raw  = arguments.get("value")
+                unit = str(arguments.get("unit") or "").strip().lower()
+                if raw is None or prop not in _STREAM_PROP_SI_LIMITS:
+                    return None
+                v = float(raw)
+
+                # Convert to SI
+                if prop == "temperature":
+                    if unit in ("c", "°c", "celsius"):
+                        si = v + 273.15
+                    elif unit in ("f", "°f", "fahrenheit"):
+                        si = (v - 32) * 5 / 9 + 273.15
+                    else:
+                        si = v          # assume K
+                elif prop == "pressure":
+                    _P = {"bar": 1e5, "kpa": 1e3, "atm": 101325.0,
+                          "psi": 6894.76, "mpa": 1e6, "barg": 1e5}
+                    if unit in _P:
+                        si = v * _P[unit]
+                    elif unit == "barg":
+                        si = (v + 1.01325) * 1e5
+                    else:
+                        si = v          # assume Pa
+                else:
+                    si = v              # flows and VF already in SI for this check
+
+                lo, hi = _STREAM_PROP_SI_LIMITS[prop]
+                if si < lo:
+                    return (f"set_stream_property: {prop}={v} {unit or '(SI)'} converts to "
+                            f"{si:.3g} which is below minimum {lo} (SI).")
+                if si > hi:
+                    return (f"set_stream_property: {prop}={v} {unit or '(SI)'} converts to "
+                            f"{si:.3g} which exceeds safety limit {hi} (SI). "
+                            f"Max industrial values: T≤2500 K, P≤1500 bar.")
+
+            elif tool_name == "set_unit_op_property":
+                prop  = str(arguments.get("property_name") or "").lower()
+                raw   = arguments.get("value")
+                unit  = str(arguments.get("unit") or "").strip().lower()
+                if raw is None:
+                    return None
+                try:
+                    v = float(raw)
+                except (TypeError, ValueError):
+                    return None         # non-numeric value — let bridge handle it
+
+                # Efficiency / conversion are dimensionless fractions [0, 1]
+                if any(k in prop for k in ("efficiency", "conversion")):
+                    if not (0.0 <= v <= 1.0):
+                        return (f"set_unit_op_property: {prop}={v} must be in [0, 1] "
+                                f"(it is a dimensionless fraction).")
+
+                # Outlet temperature (K by default)
+                if "outlettemperature" in prop or "outlet_temperature" in prop:
+                    if unit in ("c", "°c"):
+                        si = v + 273.15
+                    elif unit in ("f", "°f"):
+                        si = (v - 32) * 5 / 9 + 273.15
+                    else:
+                        si = v
+                    if si < 0:
+                        return f"set_unit_op_property: OutletTemperature {v} {unit or 'K'} is below absolute zero."
+                    if si > 2500:
+                        return (f"set_unit_op_property: OutletTemperature {si:.1f} K "
+                                f"exceeds safety limit (2500 K).")
+        except Exception:
+            pass   # validation must never crash the agent
+        return None
+
     def _run_tool(self, name: str, arguments) -> dict:
         if not isinstance(arguments, dict):
             arguments = {}
 
         # Coerce argument types before dispatching to bridge
         arguments = self._coerce_arguments(name, arguments)
+
+        # Gap 3: validate physical property ranges before the .NET bridge sees them
+        range_error = self._validate_property_range(name, arguments)
+        if range_error is not None:
+            self._log(f"[RangeGuard] Blocked '{name}': {range_error}")
+            return {"success": False, "code": "RANGE_VIOLATION", "error": range_error}
 
         # Guard: check tool call ordering preconditions
         precond_error = _check_tool_preconditions(name, self.bridge)

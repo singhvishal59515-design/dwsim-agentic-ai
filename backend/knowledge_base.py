@@ -4111,11 +4111,39 @@ class KnowledgeBase:
         q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
         return (self._semb @ q_emb).tolist()
 
+    # ── Query result cache (Chip Huyen Ch.10: reduce latency via exact caching) ──
+    # BM25 is deterministic — same query always returns same result.
+    # Cache up to 256 recent queries in an LRU dict (thread-safe via lock).
+    _CACHE_MAX = 256
+    _query_cache: Dict[str, dict] = {}
+    _cache_lock  = __import__('threading').Lock()
+
+    @classmethod
+    def _cache_get(cls, key: str):
+        with cls._cache_lock:
+            return cls._query_cache.get(key)
+
+    @classmethod
+    def _cache_set(cls, key: str, value: dict) -> None:
+        with cls._cache_lock:
+            if len(cls._query_cache) >= cls._CACHE_MAX:
+                # Evict oldest entry (insertion-order dict in Python 3.7+)
+                oldest = next(iter(cls._query_cache))
+                del cls._query_cache[oldest]
+            cls._query_cache[key] = value
+
     def search(self, query: str, top_k: int = 5) -> dict:
         """
         Search the knowledge base. Returns matching chunks ranked by relevance.
-        Uses semantic search when sentence-transformers is installed,
-        otherwise falls back to TF-IDF.
+
+        Retrieval strategy (Chip Huyen AI Engineering Ch. 6):
+          1. BM25 sparse retrieval — best for exact domain-specific terms
+             (NRTL, Rachford-Rice, kij) where semantic search adds noise.
+          2. Retrieve 2× top_k candidates, then filter by MIN_SCORE threshold
+             (re-ranking step: score quality gate replaces cut-off by rank alone).
+          3. Results cached by (query, top_k) for identical repeat queries — zero
+             latency on proactive RAG injection when same query fires multiple turns.
+        Falls back to semantic search if sentence-transformers is installed.
         """
         if not query or not query.strip():
             return {"success": True, "query": query,
@@ -4124,8 +4152,20 @@ class KnowledgeBase:
 
         top_k = min(int(top_k), len(self.chunks))
 
+        # ── Exact cache lookup ────────────────────────────────────────────────
+        cache_key = f"{query.strip().lower()}|{top_k}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return {**cached, "_cached": True}
+
         with self._sem_lock:
             use_sem = self._use_sem
+
+        # ── Retrieve 2× candidates for better score-based re-ranking ─────────
+        # Book insight: retrieve more than needed, then apply quality threshold.
+        # This avoids cutting off a highly relevant chunk ranked at position top_k+1
+        # just because a slightly less relevant chunk ranked higher.
+        retrieve_n = min(top_k * 2, len(self.chunks))
 
         if use_sem:
             raw_scores = self._semantic_scores(query)
@@ -4136,26 +4176,31 @@ class KnowledgeBase:
             indexed = sorted(enumerate(raw_scores), key=lambda x: -x[1])
             method = "bm25"
 
-        # Apply minimum score threshold for BOTH methods:
-        # - BM25: small positive threshold filters truly irrelevant results
-        # - Semantic: cosine similarity can be negative (opposite direction in
-        #   embedding space = anti-relevant). Filter out negative scores too.
-        MIN_SCORE = 0.05   # cosine ≥ 0 for semantic; small positive for bm25
+        # ── Score threshold (quality gate instead of pure rank cut-off) ───────
+        # BM25: min_score 0.5 — anything below contributes almost no signal.
+        # Semantic: min_score 0.05 — cosine can be negative (anti-relevant).
+        MIN_SCORE = 0.5 if method == "bm25" else 0.05
         results = []
-        for idx, score in indexed[:top_k]:
+        for idx, score in indexed[:retrieve_n]:
             if score <= MIN_SCORE:
-                continue   # applies to both tfidf and semantic
+                continue
+            if len(results) >= top_k:
+                break
             chunk = self.chunks[idx].copy()
             chunk["relevance_score"] = round(float(score), 4)
             results.append(chunk)
 
-        return {
+        result = {
             "success":          True,
             "query":            query,
             "result_count":     len(results),
             "results":          results,
             "retrieval_method": method,
         }
+
+        # Cache the result for future identical queries
+        self._cache_set(cache_key, result)
+        return result
 
     def _bm25_scores(self, query: str) -> List[float]:
         """BM25 scoring — scores are non-negative, comparable across queries."""
