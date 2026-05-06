@@ -161,7 +161,15 @@ DWSIM_TOOLS = [
                              "mass_flow", "vapor_fraction"],
                     "description": "Which property to set.",
                 },
-                "value": {"type": "number", "description": "Numeric value in the given unit."},
+                "value": {
+                    "type": "number",
+                    "description": (
+                        "Numeric value in the given unit. "
+                        "Safe ranges: temperature 0–2500 K (or -273–2227 °C); "
+                        "pressure 0–1.5e8 Pa (0–1500 bar); "
+                        "flows ≥ 0; vapor_fraction 0–1."
+                    ),
+                },
                 "unit":  {"type": "string",
                           "description": "Unit string, e.g. 'C', 'bar', 'kg/h'. Leave empty for SI default."},
             },
@@ -174,14 +182,23 @@ DWSIM_TOOLS = [
             "Set a parameter on a unit operation. "
             "Use get_object_properties first to see available parameter names. "
             "Examples: Efficiency, Conversion, DeltaP, OutletTemperature, "
-            "Area, OverallCoefficient, RefluxRatio."
+            "Area, OverallCoefficient, RefluxRatio. "
+            "Efficiency and Conversion must be in [0, 1]. "
+            "OutletTemperature range: 0–2500 K (or equivalent in °C/°F)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "tag":           {"type": "string", "description": "Tag of the unit operation."},
                 "property_name": {"type": "string", "description": "Attribute name (case-insensitive)."},
-                "value":         {"type": "string", "description": "Value to set."},
+                "value":         {"type": "string",
+                                  "description": (
+                                      "Value to set. Efficiency/Conversion: 0–1 (fraction). "
+                                      "OutletTemperature: in K by default (or specify unit). "
+                                      "DeltaP: Pa by default."
+                                  )},
+                "unit":          {"type": "string",
+                                  "description": "Optional unit for auto-conversion, e.g. 'C', 'bar', 'kW'."},
             },
             "required": ["tag", "property_name", "value"],
         },

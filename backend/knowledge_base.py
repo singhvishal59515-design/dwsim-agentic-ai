@@ -4009,6 +4009,222 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
         "source": "Smith, Van Ness & Abbott Ch. 3; Perry's 9th ed. Sec. 4; Seider et al. Ch. 3",
     },
 
+    # ══════════════════════════════════════════════════════════
+    # EQUIPMENT SIZING
+    # ══════════════════════════════════════════════════════════
+
+    {
+        "id": "sizing_distill_column",
+        "title": "Distillation Column Sizing — Diameter, Tray Spacing, and Packed Height",
+        "text": (
+            "After determining theoretical stages N and reflux ratio R, physical column sizing: "
+            "COLUMN DIAMETER from Souders-Brown equation: "
+            "  Flooding velocity: u_f = C_SB × sqrt((rho_L - rho_V) / rho_V)  [m/s] "
+            "  C_SB (Souders-Brown factor): 0.06-0.12 m/s for tray columns (use 0.08 as default). "
+            "  Volumetric vapor flow at top: Q_V = V_molar × MW_avg / rho_V  [m³/s] "
+            "  Cross-sectional area: A = Q_V / (0.8 × u_f)  [m²]  (80% flood design) "
+            "  Column diameter: D = sqrt(4A/pi)  [m] "
+            "Example: 1000 kmol/h vapor, rho_V=2 kg/m³, rho_L=800 kg/m³, MW=30 g/mol: "
+            "  Q_V = (1000/3600) × 30/1000 / 2 = 4.17 m³/s "
+            "  u_f = 0.08 × sqrt((800-2)/2) = 1.59 m/s "
+            "  A = 4.17 / (0.8 × 1.59) = 3.28 m²  → D = 2.04 m (use 2.1 m standard) "
+            "TRAY COLUMN HEIGHT: "
+            "  Actual stages = N_theoretical / tray_efficiency (Murphree efficiency 0.6-0.8 typical). "
+            "  Tray spacing: 0.45-0.60 m (0.50 m standard). "
+            "  Column height = actual_stages × tray_spacing + 3-5 m (bottom sump + top disengagement). "
+            "PACKED COLUMN: "
+            "  HETP (Height Equivalent to Theoretical Plate): 0.3-0.6 m for structured packing "
+            "    (Mellapak 250Y, Koch-Glitsch), 0.4-0.8 m for random packing (25mm Raschig rings). "
+            "  Packed height = N_theoretical × HETP. "
+            "  Pressure drop: 0.5-2.0 mbar/m at 70% flood (structured), 3-8 mbar/m (random). "
+            "  F-factor check: F = u_V × sqrt(rho_V) < 2.5 Pa^0.5 (avoid flooding). "
+            "In DWSIM: report D, H, tray count after shortcut → rigorous column simulation."
+        ),
+        "tags": ["column sizing", "Souders-Brown", "flooding velocity", "diameter", "tray",
+                 "packed column", "HETP", "Murphree efficiency", "tray spacing",
+                 "distillation design", "structured packing"],
+        "source": "Perry's 9th ed. Sec. 14; Fair (1961) Petro/Chem. Eng.; Billet (1995)",
+    },
+    {
+        "id": "sizing_heat_exchanger",
+        "title": "Heat Exchanger Sizing — LMTD, U Value, and Area Calculation",
+        "text": (
+            "Shell & tube heat exchanger sizing from process duty: "
+            "STEP 1 — Calculate LMTD (Log Mean Temperature Difference): "
+            "  Counter-current (preferred): "
+            "    ΔT1 = T_hot_in - T_cold_out;  ΔT2 = T_hot_out - T_cold_in "
+            "    LMTD = (ΔT1 - ΔT2) / ln(ΔT1/ΔT2) "
+            "  Apply correction factor F (0.8-1.0 for multi-pass): LMTD_corrected = F × LMTD "
+            "STEP 2 — Overall heat transfer coefficient U (W/m²/K): "
+            "  Liquid-liquid:        U = 300-800  W/m²/K "
+            "  Gas-liquid:           U = 20-300   W/m²/K "
+            "  Condensing steam/liquid: U = 1000-6000 W/m²/K "
+            "  Vaporizing liquid/steam: U = 500-2500 W/m²/K "
+            "  Typical shell & tube:  U = 300-1000 W/m²/K (liquids both sides) "
+            "STEP 3 — Required area: A = Q / (U × LMTD_corrected) [m²] "
+            "Example: Q=1 MW, T_hot: 150→80°C, T_cold: 20→60°C counter-current: "
+            "  ΔT1=150-60=90°C, ΔT2=80-20=60°C, LMTD=73.9°C "
+            "  U=500 W/m²/K → A = 1,000,000 / (500×73.9) = 27.1 m² "
+            "FOULING ALLOWANCE: Add 20-25% to area for fouling (Rf = 0.0002 m²K/W typical). "
+            "TUBE SIZING: 19.05mm OD (3/4 in) or 25.4mm OD (1 in) standard. "
+            "  Tube velocity: 1-3 m/s (liquid), 10-30 m/s (gas) to control fouling. "
+            "In DWSIM: set U, A, and LMTD target in HeatExchanger parameters. "
+            "Verify: duty from stream ΔH must match set Q within 5%."
+        ),
+        "tags": ["heat exchanger sizing", "LMTD", "U value", "overall heat transfer",
+                 "shell tube", "fouling", "area calculation", "HX design",
+                 "condensing", "vaporizing", "counter-current"],
+        "source": "Kern (1950) Process Heat Transfer; Perry's 9th ed. Sec. 11; Seider et al.",
+    },
+    {
+        "id": "sizing_pump_compressor",
+        "title": "Pump and Compressor Sizing — Power, Head, and NPSH",
+        "text": (
+            "PUMP SIZING: "
+            "Hydraulic power: P_hyd = rho × g × Q × H  [W] "
+            "  rho = liquid density [kg/m³], g=9.81 m/s², Q=volumetric flow [m³/s], H=head [m] "
+            "Shaft power: P_shaft = P_hyd / eta_pump (pump efficiency eta = 0.6-0.85 typical) "
+            "Conversion: 1 bar pressure rise = 10.2 m head (water), = 102 m head (gas at rho=1 kg/m³). "
+            "For slurries or viscous liquids: use Hydraulic Institute correction curves. "
+            "NPSH (Net Positive Suction Head): "
+            "  NPSH_available = (P_inlet - P_vapor) / (rho × g) + V²/2g + Z_inlet "
+            "  Must exceed NPSH_required (from pump curve, typically 2-6 m). "
+            "  Cavitation occurs when NPSH_available < NPSH_required. "
+            "  Risk: hot liquids near boiling point (ethanol at 70°C, steam condensate). "
+            "COMPRESSOR SIZING: "
+            "Isentropic work per stage: W_s = (gamma/(gamma-1)) × (P1/rho1) × ((P2/P1)^((gamma-1)/gamma) - 1) "
+            "  gamma = Cp/Cv ratio: 1.4 (diatomic gases N2, air), 1.3 (CO2), 1.66 (Ar). "
+            "Max compression ratio per stage: P2/P1 ≤ 3.5-4.0 (practical limit, avoid excessive T_out). "
+            "Outlet temperature: T2 = T1 × (P2/P1)^((gamma-1)/gamma / eta_is). "
+            "For CH4 at T1=25°C, P1=1 bar → P2=10 bar: T2_is = 298×10^(0.4/1.4) = 573K (300°C). "
+            "Intercooling required above 200°C outlet — use multiple stages with intercoolers. "
+            "Power: P = m_dot × W_s / eta_is (isentropic efficiency 0.75-0.85 centrifugal). "
+            "In DWSIM: set outlet P and efficiency; read calculated power and outlet T."
+        ),
+        "tags": ["pump sizing", "NPSH", "cavitation", "compressor sizing", "isentropic",
+                 "compression ratio", "intercooling", "hydraulic power", "pump head",
+                 "centrifugal", "adiabatic", "efficiency"],
+        "source": "Walas (1990) Chemical Process Equipment; Perry's 9th ed. Sec. 10; Seider et al.",
+    },
+
+    # ══════════════════════════════════════════════════════════
+    # MULTICOMPONENT DISTILLATION
+    # ══════════════════════════════════════════════════════════
+
+    {
+        "id": "distill_multicomponent_lkhk",
+        "title": "Multicomponent Distillation — Key Component Selection and Distribution",
+        "text": (
+            "In multicomponent distillation (3+ components), identification of key components "
+            "is the most critical step before shortcut calculations. "
+            "DEFINITIONS: "
+            "  Light Key (LK): the most volatile component that appears significantly in BOTH "
+            "    distillate AND bottoms (i.e., the LK is 'split' between products). "
+            "  Heavy Key (HK): the least volatile component that appears significantly in BOTH "
+            "    distillate AND bottoms. "
+            "  Light Non-Key (LNK): more volatile than LK — goes essentially entirely to distillate. "
+            "  Heavy Non-Key (HNK): less volatile than HK — goes essentially entirely to bottoms. "
+            "LK/HK SELECTION RULES: "
+            "  1. Rank components by relative volatility α_i = K_i/K_HK at average column conditions. "
+            "     K_i = vapor pressure_i / total pressure (Raoult's law approximation for first guess). "
+            "  2. LK = component with α just above 1.0 (just above HK in volatility). "
+            "  3. HK = component with α = 1.0 (reference). "
+            "  4. Check: LK should be the heaviest component in distillate spec, "
+            "     HK should be the lightest component in bottoms spec. "
+            "EXAMPLE — Methanol/Ethanol/n-Propanol separation (1 atm): "
+            "  Boiling points: MeOH 64.7°C, EtOH 78.4°C, n-PrOH 97.2°C "
+            "  α at 80°C: MeOH≈2.1, EtOH≈1.0 (HK), n-PrOH≈0.52 "
+            "  LK=EtOH, HK=n-PrOH (if goal is EtOH in distillate and n-PrOH in bottoms). "
+            "  MeOH is LNK → goes with distillate. "
+            "DISTRIBUTED COMPONENTS: When a component's α is between LK and HK, "
+            "  it distributes between products. The Kremser equation or full rigorous simulation "
+            "  is needed to determine the split. "
+            "MULTICOMPONENT SHORTCUT PROCEDURE: "
+            "  1. Select LK and HK as above. "
+            "  2. Apply Fenske equation for N_min using LK and HK recoveries. "
+            "  3. Apply Underwood equation to find minimum reflux R_min. "
+            "     Sum over all components: Σ[α_i × z_i / (α_i - θ)] = 1 - q "
+            "     where θ is between αLK and αHK, q = feed thermal condition. "
+            "  4. Apply Gilliland correlation for actual N. "
+            "In DWSIM ShortcutColumn: set LK, HK, and their recovery fractions in distillate."
+        ),
+        "tags": ["multicomponent distillation", "light key", "heavy key", "LK", "HK",
+                 "relative volatility", "Fenske", "Underwood", "Gilliland", "shortcut",
+                 "distributed components", "key component selection", "non-key"],
+        "source": "Seider et al. Ch. 11; Treybal: Mass Transfer Operations; Perry's 9th ed.",
+    },
+    {
+        "id": "distill_hen_synthesis",
+        "title": "Heat Exchanger Network (HEN) Synthesis After Pinch Analysis",
+        "text": (
+            "After pinch analysis identifies the pinch temperature and minimum utilities, "
+            "implement the Heat Exchanger Network (HEN) following these steps: "
+            "STEP 1 — Identify hot streams (need cooling) and cold streams (need heating). "
+            "  Above pinch: use hot utility to heat cold streams; never transfer heat across pinch. "
+            "  Below pinch: use cold utility to cool hot streams; never transfer heat across pinch. "
+            "STEP 2 — Apply pinch rules: "
+            "  Rule 1: No heat transfer across the pinch (violates minimum utility target). "
+            "  Rule 2: No hot utility below the pinch. "
+            "  Rule 3: No cold utility above the pinch. "
+            "  Violations of these rules increase energy consumption by exactly the amount transferred. "
+            "STEP 3 — Match streams using tick-off heuristic: "
+            "  Above pinch: start at pinch. Match hot stream to cold stream where feasible. "
+            "    Feasibility: C_P_hot ≤ C_P_cold (heat capacity flowrate) to avoid temperature cross. "
+            "  Below pinch: start at pinch. Match cold stream to hot stream. "
+            "    Feasibility: C_P_cold ≤ C_P_hot. "
+            "STEP 4 — Calculate exchanger areas using LMTD for each match. "
+            "STEP 5 — Implement in DWSIM: "
+            "  For each heat exchanger match: "
+            "  (a) Add a HeatExchanger unit op. "
+            "  (b) Connect hot stream inlet/outlet and cold stream inlet/outlet. "
+            "  (c) Set duty from pinch analysis match (set Q, not T_out). "
+            "  (d) Set minimum approach temperature ΔT_min in HX specifications. "
+            "  (e) Verify no temperature crossover: T_hot_out > T_cold_in + ΔT_min. "
+            "ENERGY SAVINGS FORMULA: "
+            "  Q_HEN_savings = Q_hot_utility_before - Q_hot_utility_after "
+            "  For a 10 MW process: typically 20-40% energy savings achievable via HEN. "
+            "COMMON MISTAKE: Adding heat exchangers between streams that cross the pinch "
+            "  INCREASES total utility consumption — always check which side of pinch each stream is on."
+        ),
+        "tags": ["HEN synthesis", "heat exchanger network", "pinch analysis", "pinch rules",
+                 "tick-off heuristic", "hot utility", "cold utility", "heat integration",
+                 "stream matching", "energy saving", "LMTD", "approach temperature"],
+        "source": "Linnhoff et al. (1982) User Guide on Process Integration; Kemp (2007) Pinch Analysis",
+    },
+    {
+        "id": "sizing_vessel_reactor",
+        "title": "Vessel and Reactor Sizing — Volume, L/D Ratio, and Residence Time",
+        "text": (
+            "REACTOR/VESSEL SIZING from residence time and throughput: "
+            "CSTR volume: V = F_0 × X × tau = Q × C_A0 × X / (-r_A)  [m³] "
+            "  Where tau = residence time [h], Q = volumetric flow [m³/h], X = conversion. "
+            "  Typical tau: chemical reactions 0.5-4 h; fermenters 12-72 h; crystallizers 1-8 h. "
+            "PFR volume: V = F_A0 × ∫(dX / -r_A) — integrate rate equation from 0 to X. "
+            "  For first-order reaction: V/Q = -ln(1-X) / k. "
+            "  k at operating T from Arrhenius: k = k_0 × exp(-Ea/RT). "
+            "L/D RATIO (Length to Diameter): "
+            "  Horizontal vessels (liquid-liquid, flash drums): L/D = 3-5. "
+            "  Vertical vessels (vapor-liquid separators): L/D = 1-2 (wider for disengagement). "
+            "  Tubular reactors (PFR): L/D = 20-100 (long and narrow for plug flow). "
+            "  CSTRs: L/D ≈ 1 (height ≈ diameter for good mixing). "
+            "FLASH DRUM SIZING: "
+            "  Vapor velocity: u_V = K × sqrt((rho_L - rho_V) / rho_V) "
+            "  K = 0.04-0.06 m/s (Souders-Brown for flash drum). "
+            "  Liquid residence time: 5-10 min in liquid sump (for control). "
+            "  Diameter from vapor velocity, height from liquid residence time. "
+            "MATERIAL OF CONSTRUCTION: "
+            "  Carbon steel: T < 400°C, no H2S/HCl, pH 6-10. "
+            "  304/316 SS: corrosive chemicals, T < 600°C. "
+            "  Hastelloy C: HCl, Cl₂, very corrosive; T < 650°C. "
+            "In DWSIM: vessel sizing is not automated — calculate V, D, H manually, "
+            "  then specify in equipment cost as a custom vessel."
+        ),
+        "tags": ["vessel sizing", "CSTR sizing", "PFR sizing", "residence time", "L/D ratio",
+                 "flash drum", "reactor volume", "Souders-Brown", "material of construction",
+                 "Arrhenius", "conversion", "mixing"],
+        "source": "Fogler (2016) Elements of CRE; Seider et al. Ch. 12; Perry's 9th ed. Sec. 6",
+    },
+
 ]
 
 

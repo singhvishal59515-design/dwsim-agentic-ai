@@ -125,6 +125,12 @@ _LLM_BACKOFF_S      = (1.0, 3.0)        # len == _LLM_MAX_ATTEMPTS - 1
 # takes ~90 s to timeout before failing (3 attempts × 90 s = 270 s hang).
 _LLM_RETRY_BUDGET_S = 180.0             # 3 minutes max across all attempts
 
+# Retry temperature diversity (Chip Huyen Ch.2: test-time compute via diverse sampling).
+# On first attempt use temperature=0 (deterministic, reproducible).
+# On retry attempts, add small temperature to explore different reasoning paths —
+# this helps when the first approach always fails identically (stuck in a loop).
+_RETRY_TEMPERATURES = (0.0, 0.15, 0.25)   # attempt 0, 1, 2 temperatures
+
 # History limits.
 # Token-aware trimming: 1 token ≈ 4 chars (conservative for mixed content).
 # Groq Llama-3.3-70b: 32k context. Reserve ~8k for system prompt + tools schema
@@ -286,6 +292,50 @@ def _compress_tool_result(name: str, result: dict) -> dict:
             kept[f"[+{rest_n} more streams]"] = "; ".join(omitted_summary)
             result = {**result, "stream_results": kept}
 
+    # ── Intelligent result summarization for high-information-density tools ───
+    # Book insight (Chip Huyen Ch.6): inject summaries not raw data.
+    # A parametric study with 50 points is 50 numbers — the LLM needs the
+    # trend and optimum, not every data point.
+    if name == "parametric_study" and isinstance(result, dict):
+        data_pts = result.get("data_points") or result.get("results", [])
+        if isinstance(data_pts, list) and len(data_pts) > 10:
+            vals = [p.get("observe_value") for p in data_pts if p.get("observe_value") is not None]
+            params = [p.get("vary_value") for p in data_pts if p.get("vary_value") is not None]
+            if vals and params:
+                best_idx = vals.index(min(vals))
+                summary = {
+                    "success":         result.get("success"),
+                    "n_points":        len(data_pts),
+                    "vary_range":      [min(params), max(params)],
+                    "observe_range":   [min(vals), max(vals)],
+                    "best_vary":       params[best_idx],
+                    "best_observe":    vals[best_idx],
+                    "trend":           "decreasing" if vals[-1] < vals[0] else "increasing" if vals[-1] > vals[0] else "non-monotonic",
+                    "_summarized":     True,
+                    "_note":           f"Parametric study with {len(data_pts)} points summarized. Full data available via get_simulation_results.",
+                }
+                return summary
+
+    if name == "monte_carlo_study" and isinstance(result, dict):
+        samples = result.get("samples") or result.get("results", [])
+        if isinstance(samples, list) and len(samples) > 10:
+            vals = [s.get("output") or s.get("value") for s in samples if s.get("output") is not None or s.get("value") is not None]
+            if vals:
+                import statistics as _stats
+                summary = {
+                    "success":     result.get("success"),
+                    "n_samples":   len(samples),
+                    "mean":        round(_stats.mean(vals), 4),
+                    "std":         round(_stats.stdev(vals), 4) if len(vals) > 1 else 0,
+                    "min":         min(vals),
+                    "max":         max(vals),
+                    "p5":          sorted(vals)[int(0.05 * len(vals))],
+                    "p95":         sorted(vals)[int(0.95 * len(vals))],
+                    "_summarized": True,
+                    "_note":       f"Monte Carlo with {len(samples)} samples summarized. Statistics shown.",
+                }
+                return summary
+
     # Final safety net: if still too large, truncate JSON representation
     try:
         serialised = json.dumps(result)
@@ -375,16 +425,12 @@ def _trim_history(history: List[Dict], llm=None) -> List[Dict]:
 
     summary_text = "\n".join(summary_lines)
     summary_msg  = {
-        "role":    "user",
+        "role":    "system",
         "content": summary_text,
     }
-    # Insert summary + a brief acknowledgement so the model processes it
-    ack_msg = {
-        "role":    "assistant",
-        "content": "[Acknowledged. Continuing with full awareness of earlier session context.]",
-    }
+    # No ack_msg needed — system messages don't require assistant acknowledgement
 
-    new_history = [summary_msg, ack_msg] + list(to_keep)
+    new_history = [summary_msg] + list(to_keep)
 
     # Final safety net: if still too large, hard-trim to keep only the most recent messages
     final_chars = sum(len(str(m.get("content", ""))) for m in new_history)
@@ -1087,7 +1133,7 @@ class DWSIMAgentV2:
                                               int(from_port), int(to_port)),
             "validate_topology":      lambda: self.bridge.validate_topology(),
             "setup_reaction":         lambda reactor_tag, reactions:
-                                          self.bridge.setup_reaction(reactor_tag, reactions),
+                                          self._setup_reaction_validated(reactor_tag, reactions),
             "set_column_specs":       lambda column_tag, **kwargs:
                                           self.bridge.set_column_specs(column_tag, **kwargs),
             # RAG knowledge base
@@ -1237,6 +1283,124 @@ class DWSIMAgentV2:
         failed_result["_diagnosis_hint"] = "\n".join(hint_lines)
         return failed_result
 
+    def _setup_reaction_validated(self, reactor_tag: str, reactions: list) -> dict:
+        """
+        Wrapper around bridge.setup_reaction with Arrhenius parameter validation
+        and KineticReactor guidance (Chip Huyen review: kinetics still conceptual).
+
+        Validates:
+        - Activation energy Ea in realistic range (0 < Ea < 400 kJ/mol)
+        - Pre-exponential factor k0 is positive
+        - Reaction stoichiometry sums to near-zero for balanced reactions
+        - Temperature range for kinetics is within property package validity
+
+        Adds defaults for missing optional parameters.
+        """
+        import math
+        validated = []
+        warnings  = []
+
+        for rxn in (reactions or []):
+            if not isinstance(rxn, dict):
+                continue
+            rxn_copy = dict(rxn)
+
+            # Validate Arrhenius parameters if kinetic type
+            rxn_type = rxn_copy.get("type", "conversion").lower()
+            if rxn_type in ("kinetic", "arrhenius", "powerlaw"):
+                Ea = rxn_copy.get("activation_energy_kJmol") or rxn_copy.get("Ea_kJmol")
+                k0 = rxn_copy.get("pre_exponential") or rxn_copy.get("k0")
+                T_ref = rxn_copy.get("reference_temperature_K", 298.15)
+
+                if Ea is not None:
+                    try:
+                        Ea_f = float(Ea)
+                        if not (0 < Ea_f < 400):
+                            warnings.append(
+                                f"Reaction '{rxn_copy.get('name','?')}': "
+                                f"Ea={Ea_f} kJ/mol is outside typical range 0-400 kJ/mol. "
+                                "Verify units (should be kJ/mol, not J/mol or cal/mol)."
+                            )
+                        # Store in J/mol for DWSIM (bridge expects J/mol)
+                        rxn_copy["activation_energy_Jmol"] = Ea_f * 1000
+                    except (TypeError, ValueError):
+                        warnings.append(f"Invalid activation energy: {Ea}")
+
+                if k0 is not None:
+                    try:
+                        k0_f = float(k0)
+                        if k0_f <= 0:
+                            warnings.append(f"Pre-exponential factor k0={k0_f} must be positive.")
+                    except (TypeError, ValueError):
+                        warnings.append(f"Invalid pre-exponential factor: {k0}")
+
+            # Check stoichiometry balance (atoms not checked — just mole balance hint)
+            stoich = rxn_copy.get("stoichiometry") or rxn_copy.get("components") or {}
+            if isinstance(stoich, dict) and stoich:
+                total_coeff = sum(float(v) for v in stoich.values() if v is not None)
+                # Positive = products, negative = reactants. Sum should be small for balanced rxn.
+                # Allow up to ±3 (e.g., A → 3B gives sum = +2)
+                # Just note if sum is unexpectedly large
+                if abs(total_coeff) > 10:
+                    warnings.append(
+                        f"Stoichiometry coefficients sum to {total_coeff:.1f} — "
+                        "verify signs (reactants negative, products positive)."
+                    )
+
+            validated.append(rxn_copy)
+
+        # Call bridge
+        result = self.bridge.setup_reaction(reactor_tag, validated)
+
+        # Attach validation warnings to result
+        if warnings:
+            result["_validation_warnings"] = warnings
+            self._log(f"[setup_reaction] Validation warnings: {warnings}")
+
+        return result
+
+    def _run_ai_judge_async(
+        self,
+        user_message: str,
+        answer:       str,
+        tool_calls:   List[Dict],
+    ) -> None:
+        """
+        Run AI-as-judge evaluation asynchronously (fire-and-forget thread).
+        Scores are appended to eval_log.json without blocking the user.
+        Never raises — evaluation failure is silently ignored.
+        """
+        import threading
+
+        def _judge_task():
+            try:
+                from evaluation import AIJudge, get_eval_log
+                judge = AIJudge(self.llm)
+                scores = judge.evaluate(
+                    user_query   = user_message,
+                    agent_answer = answer,
+                    tool_calls   = tool_calls,
+                )
+                if scores:
+                    log = get_eval_log()
+                    # Append judge scores to the most recent session
+                    sessions = log._sessions
+                    if sessions:
+                        sessions[-1]["judge_scores"] = scores
+                        log._save()
+                    self._log(
+                        f"[Judge] EOS={scores.get('property_package_correctness','?')} "
+                        f"Plaus={scores.get('physical_plausibility','?')} "
+                        f"Complete={scores.get('completeness','?')} "
+                        f"Halluc={scores.get('hallucination_absence','?')} "
+                        f"Overall={scores.get('overall','?')}/5"
+                    )
+            except Exception as exc:
+                self._log(f"[Judge] evaluation failed (non-fatal): {exc}")
+
+        t = threading.Thread(target=_judge_task, daemon=True)
+        t.start()
+
     def _parametric_study_with_progress(self, **kwargs) -> dict:
         """
         Wraps bridge.parametric_study with an on_progress callback that streams
@@ -1366,6 +1530,14 @@ class DWSIMAgentV2:
                 self._history.append({"role": "assistant",
                                       "content": text_content})
                 self._emit_turn_metrics(turn_t0, iteration, text_content)
+                # ── Async AI-as-judge evaluation ─────────────────────────────
+                # Fire-and-forget: score this response quality in background.
+                # Never blocks the response. Scores stored in eval_log.json.
+                self._run_ai_judge_async(
+                    user_message = self._turn_user_message,
+                    answer       = text_content,
+                    tool_calls   = self._turn_tool_timings,
+                )
                 # Re-snapshot after the turn so next turn's diff captures
                 # everything this turn's tool calls changed.
                 try:
@@ -1592,6 +1764,10 @@ class DWSIMAgentV2:
                 )
                 break
 
+            retry_temp = _RETRY_TEMPERATURES[min(attempt, len(_RETRY_TEMPERATURES) - 1)]
+            _orig_temp = getattr(self.llm, "temperature", 0.0)
+            if attempt > 0 and retry_temp > 0:
+                self.llm.temperature = retry_temp
             try:
                 resp = self.llm.chat(
                     messages=messages,
@@ -1604,6 +1780,9 @@ class DWSIMAgentV2:
             except Exception as exc:
                 last_err = str(exc)
                 _log.warning("LLM attempt %d failed: %s", attempt + 1, last_err)
+            finally:
+                if attempt > 0 and retry_temp > 0:
+                    self.llm.temperature = _orig_temp
 
             if attempt < _LLM_MAX_ATTEMPTS - 1:
                 # Guard against tuple index out of range

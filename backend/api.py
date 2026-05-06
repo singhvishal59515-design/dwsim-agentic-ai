@@ -113,6 +113,12 @@ def _detect_prompt_injection(text: str) -> Optional[str]:
         # SQL/code injection via natural language
         r"delete (all|the|every) (data|records?|entries|rows?|tables?)",
         r"drop (the |all )?(tables?|database|schema)",
+        # DWSIM-specific: tool argument injection risks
+        r"load[_\s]flowsheet.*\.\.(\\|/)",            # path traversal in file paths
+        r"load[_\s]flowsheet.*(etc|system32|passwd|shadow|win\.ini)",  # sensitive files
+        r"(delete|remove|destroy).*(all|every).*(stream|unit|object|flowsheet)",  # mass delete
+        r"replay[_\s]log.*inject",                     # JSONL injection into replay log
+        r"new[_\s]flowsheet.*[<>|&;`]",               # shell injection in flowsheet name
     ]
 
     for pattern in INJECTION_PATTERNS:

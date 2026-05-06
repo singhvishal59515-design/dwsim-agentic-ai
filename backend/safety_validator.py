@@ -102,6 +102,7 @@ class SafetyValidator:
         failures += self._check_supercritical_conditions(stream_results)
         failures += self._check_impossible_vapor_fraction(stream_results)
         failures += self._check_vlle_risk(stream_results)
+        failures += self._check_phase_consistency(stream_results)
         failures += self._check_vapor_fraction(stream_results)
         failures += self._check_mass_balance(stream_results, topology)
         failures += self._check_temperature_direction(stream_results, topology)
@@ -805,6 +806,130 @@ class SafetyValidator:
 
         return out
 
+    def _check_phase_consistency(
+        self, streams: Dict[str, Dict[str, Any]]
+    ) -> List[ValidationFailure]:
+        """
+        SF-13: Verify vapor fraction is consistent with T and P using Antoine equation.
+        A stream at 25°C, 1 bar that is reported as 50% vapor when its dominant
+        component has Psat(25°C) = 0.032 bar is thermodynamically impossible
+        (entire stream should be liquid). Catches silent flash convergence failures.
+
+        Only checks streams with a single dominant compound (>80 mol%) where
+        Antoine constants are available. Multi-component streams require full
+        flash calculation and are skipped.
+        """
+        # Antoine constants (log10(P_mmHg) = A - B/(C + T_C)) for key compounds
+        # Source: DIPPR 801 / Perry's 9th ed.
+        ANTOINE: Dict[str, Dict] = {
+            "water":     {"A": 8.10765, "B": 1750.286, "C": 235.000, "Tmin": 60,  "Tmax": 150},
+            "methanol":  {"A": 7.87863, "B": 1473.110, "C": 230.000, "Tmin": 15,  "Tmax": 84},
+            "ethanol":   {"A": 8.11220, "B": 1592.864, "C": 226.184, "Tmin": 20,  "Tmax": 93},
+            "acetone":   {"A": 7.11714, "B": 1210.595, "C": 229.664, "Tmin": -26, "Tmax": 77},
+            "benzene":   {"A": 6.90565, "B": 1211.033, "C": 220.790, "Tmin": 8,   "Tmax": 80},
+            "toluene":   {"A": 6.95087, "B": 1342.310, "C": 219.187, "Tmin": 6,   "Tmax": 137},
+            "n-hexane":  {"A": 6.87601, "B": 1171.530, "C": 224.366, "Tmin": -25, "Tmax": 92},
+            "n-heptane": {"A": 6.89385, "B": 1264.370, "C": 216.636, "Tmin": -2,  "Tmax": 124},
+            "ethyl acetate": {"A": 7.10179, "B": 1244.951, "C": 217.881, "Tmin": 16, "Tmax": 77},
+            "chloroform":{"A": 6.90328, "B": 1163.030, "C": 227.400, "Tmin": 4,   "Tmax": 84},
+            "acetonitrile":{"A": 7.11988,"B": 1285.703, "C": 223.516, "Tmin": 20, "Tmax": 82},
+            "acetic acid":{"A": 7.80307, "B": 1651.200, "C": 225.000, "Tmin": 17, "Tmax": 118},
+        }
+        # Conversion: 1 bar = 750.062 mmHg
+        _BAR_TO_MMHG = 750.062
+
+        out = []
+        for tag, props in streams.items():
+            if not isinstance(props, dict):
+                continue
+
+            T_C = props.get("temperature_C")
+            if T_C is None:
+                T_K = props.get("temperature_K")
+                if T_K: T_C = T_K - 273.15
+            if T_C is None:
+                continue
+
+            P_bar = props.get("pressure_bar")
+            if P_bar is None:
+                P_Pa = props.get("pressure_Pa")
+                if P_Pa: P_bar = P_Pa / 1e5
+            if not P_bar or P_bar <= 0:
+                continue
+
+            vf = props.get("vapor_fraction")
+            if vf is None:
+                continue
+            try:
+                vf_f = float(vf)
+            except (TypeError, ValueError):
+                continue
+
+            # Find dominant component (>80 mol fraction)
+            comps = props.get("mole_fractions") or props.get("composition") or {}
+            if not isinstance(comps, dict) or not comps:
+                continue
+            dominant_comp = None
+            dominant_frac = 0.0
+            for comp, frac in comps.items():
+                try:
+                    f = float(frac or 0)
+                    if f > dominant_frac:
+                        dominant_frac = f
+                        dominant_comp = comp.lower().strip()
+                except (TypeError, ValueError):
+                    continue
+
+            if dominant_frac < 0.80 or dominant_comp is None:
+                continue  # multi-component — skip
+
+            # Find Antoine constants
+            ant = ANTOINE.get(dominant_comp)
+            if ant is None:
+                continue
+
+            # Only use Antoine within valid temperature range
+            if not (ant["Tmin"] <= T_C <= ant["Tmax"]):
+                continue
+
+            # Calculate Psat in bar
+            try:
+                psat_mmhg = 10 ** (ant["A"] - ant["B"] / (ant["C"] + T_C))
+                psat_bar  = psat_mmhg / _BAR_TO_MMHG
+            except (ValueError, ZeroDivisionError):
+                continue
+
+            # Check consistency
+            # If P_stream >> Psat: should be ALL LIQUID (vf should be ≈ 0)
+            # If P_stream << Psat: should be ALL VAPOR (vf should be ≈ 1)
+            TOLERANCE = 0.15  # allow 15% vf tolerance before flagging
+
+            if P_bar > psat_bar * 2.0 and vf_f > TOLERANCE:
+                out.append(ValidationFailure(
+                    code="SF-13", severity="WARNING",
+                    description=(
+                        f"Stream '{tag}' ({dominant_comp}, {dominant_frac:.0%} purity): "
+                        f"reported VF={vf_f:.2f} but P={P_bar:.3f} bar >> Psat={psat_bar:.4f} bar "
+                        f"at T={T_C:.1f}°C. Stream should be fully liquid at these conditions. "
+                        "Flash calculation may have converged to wrong phase."
+                    ),
+                    evidence=f"P/Psat={P_bar/psat_bar:.1f}x, VF={vf_f:.3f}, T={T_C:.1f}°C",
+                    stream_tag=tag,
+                ))
+            elif P_bar < psat_bar * 0.5 and vf_f < (1.0 - TOLERANCE):
+                out.append(ValidationFailure(
+                    code="SF-13b", severity="WARNING",
+                    description=(
+                        f"Stream '{tag}' ({dominant_comp}, {dominant_frac:.0%} purity): "
+                        f"reported VF={vf_f:.2f} but P={P_bar:.3f} bar << Psat={psat_bar:.4f} bar "
+                        f"at T={T_C:.1f}°C. Stream should be fully vapor at these conditions. "
+                        "Check if stream is above dew point."
+                    ),
+                    evidence=f"Psat/P={psat_bar/P_bar:.1f}x, VF={vf_f:.3f}, T={T_C:.1f}°C",
+                    stream_tag=tag,
+                ))
+        return out
+
     def _check_vapor_fraction(
         self, streams: Dict[str, Dict[str, Any]]
     ) -> List[ValidationFailure]:
@@ -1274,6 +1399,17 @@ KNOWN_SILENT_FAILURES = [
         "status":       "DETECTED post-solve",
         "where_fixed":  "SafetyValidator._check_vlle_risk",
         "detection":    "Post-solve — checks stream composition against known immiscible pairs",
+        "severity":     "WARNING",
+    },
+    {
+        "code":         "SF-13",
+        "name":         "Phase inconsistency — vapor fraction contradicts Psat at stream T/P conditions",
+        "description":  "Stream vapor fraction is thermodynamically inconsistent with the Antoine "
+                        "equation Psat at the reported T and P. Indicates a silent flash "
+                        "convergence failure or wrong phase assignment.",
+        "status":       "DETECTED post-solve",
+        "where_fixed":  "SafetyValidator._check_phase_consistency",
+        "detection":    "Post-solve — Antoine equation Psat vs reported VF for single-dominant-component streams",
         "severity":     "WARNING",
     },
 ]
