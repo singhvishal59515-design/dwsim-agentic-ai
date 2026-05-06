@@ -121,7 +121,7 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: npm install --prefer-offline
+        run: npm install --legacy-peer-deps
 
       - name: TypeScript type-check
         run: npx tsc --noEmit
