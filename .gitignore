@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Environment / secrets — NEVER commit these
+backend/.env
+*.env
+.env.*
+!.env.example
+
+# DWSIM database (rebuilt automatically)
+backend/thermo_properties.db
+
+# Embedding cache (rebuilt on first run)
+backend/__pycache__/kb_embeddings_*.npy
+
+# Logs and output files
+backend/*.log
+backend/ablation_log*.jsonl
+backend/ablation_log_backup.jsonl
+backend/ablation_log_stale.jsonl
+backend/eval_log.json
+backend/accuracy_store.json
+backend/benchmarks.json
+backend/failure_cases.json
+backend/flowsheet_render.png
+backend/server.log
+backend/backend.log
+
+# Test artifacts
+backend/.pytest_cache/
+backend/junit.xml
+.coverage
+htmlcov/
+
+# Frontend build
+frontend/build/
+frontend/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# DWSIM flowsheet files (usually large binary)
+*.dwxmz
+*.dwxm
+
+# Windows kill scripts
+backend/_kill*.ps1
+
+# Temporary audit/check scripts
+backend/_*.py
+
+# Replay log (session data — may contain user queries)
+backend/replay_turns/

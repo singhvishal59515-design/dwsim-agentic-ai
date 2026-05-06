@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "dev"]
+  pull_request:
+    branches: ["main", "master"]
+
+# Cancel in-progress runs for the same branch on new push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "Python ${{ matrix.python-version }} tests"
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── Python setup ─────────────────────────────────────────────────────────
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements-ci.txt
+
+      # ── Install CI-safe dependencies ─────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      # ── Lint (non-blocking) ───────────────────────────────────────────────────
+      - name: Ruff lint (warnings only)
+        run: |
+          pip install ruff --quiet
+          ruff check . --select=E9,F63,F7,F82 --exit-zero
+        continue-on-error: true
+
+      # ── Unit + integration tests (no DWSIM, no real LLM) ─────────────────────
+      - name: Run tests
+        env:
+          # Dummy keys so modules import without error; tests mock all HTTP calls
+          OPENAI_API_KEY: "sk-test-00000000000000000000000000000000"
+          ANTHROPIC_API_KEY: "sk-ant-test-00000000000000000000000000"
+          GROQ_API_KEY: "gsk_test_00000000000000000000000000000000"
+          GEMINI_API_KEY: "AIzaSyTEST_00000000000000000000000000000"
+          LLM_PROVIDER: "openai"
+          LLM_MODEL: "gpt-4o"
+          # Disable pythonnet import attempts inside bridge
+          DWSIM_SKIP_DOTNET: "1"
+        run: |
+          pytest tests/test_agent_logic.py \
+                 tests/test_integration_modules.py \
+                 tests/test_knowledge_base.py \
+                 tests/test_safety_validator.py \
+                 -v \
+                 --tb=short \
+                 --timeout=120 \
+                 -p no:warnings \
+                 --junitxml=junit.xml \
+                 -m "not dwsim and not llm"
+
+      # ── Upload test results ───────────────────────────────────────────────────
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-py${{ matrix.python-version }}
+          path: backend/junit.xml
+
+      # ── Coverage report ───────────────────────────────────────────────────────
+      - name: Coverage (informational)
+        env:
+          OPENAI_API_KEY: "sk-test-00000000000000000000000000000000"
+          ANTHROPIC_API_KEY: "sk-ant-test-00000000000000000000000000"
+          GROQ_API_KEY: "gsk_test_00000000000000000000000000000000"
+          GEMINI_API_KEY: "AIzaSyTEST_00000000000000000000000000000"
+          LLM_PROVIDER: "openai"
+          LLM_MODEL: "gpt-4o"
+          DWSIM_SKIP_DOTNET: "1"
+        run: |
+          pip install pytest-cov --quiet
+          pytest tests/test_agent_logic.py \
+                 tests/test_integration_modules.py \
+                 tests/test_knowledge_base.py \
+                 tests/test_safety_validator.py \
+                 --cov=. \
+                 --cov-report=term-missing:skip-covered \
+                 --cov-config=.coveragerc \
+                 -q \
+                 -m "not dwsim and not llm" \
+                 2>/dev/null || true
+        continue-on-error: true
+
+  # ── Frontend type-check (optional job) ─────────────────────────────────────
+  frontend-typecheck:
+    name: "Frontend TypeScript check"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+        continue-on-error: true
+
+      - name: Build (production)
+        run: npm run build
+        env:
+          CI: "false"          # treat React warnings as non-fatal
+          GENERATE_SOURCEMAP: "false"
+        continue-on-error: true

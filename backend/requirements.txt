@@ -1,0 +1,32 @@
+# DWSIM Agentic AI v2 — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# ── Web framework ──────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# ── LLM providers (install only what you need) ─────────────────────────────
+groq>=0.9.0                # FREE — https://console.groq.com
+# google-genai>=0.5.0      # FREE — https://aistudio.google.com
+# openai>=1.30.0           # Paid
+# anthropic>=0.25.0        # Paid
+
+# ── Scientific computing (ACC-5 optimisation) ──────────────────────────────
+scipy>=1.12.0
+numpy>=1.26.0
+
+# ── Data analysis & reporting (v4) ─────────────────────────────────────────
+pandas>=2.0.0           # DataFrame aggregation
+matplotlib>=3.8.0       # Plot generation (PNG)
+reportlab>=4.0.0        # PDF compilation
+pdfplumber>=0.11.0      # PDF text extraction (accuracy comparison, paper verification)
+
+# ── Optional: semantic RAG upgrade ─────────────────────────────────────────
+# Uncomment to enable semantic search in the knowledge base (22 MB model,
+# better paraphrase matching). Falls back to TF-IDF automatically if absent.
+# sentence-transformers>=2.7.0  # Optional semantic RAG — not needed; TF-IDF sufficient
+
+# ── DWSIM .NET bridge ──────────────────────────────────────────────────────
+pythonnet>=3.0.3           # .NET interop — requires .NET 6+ runtime

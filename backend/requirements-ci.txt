@@ -1,0 +1,33 @@
+# CI-safe requirements — no pythonnet, no .NET runtime needed
+# Tests in this subset mock the DWSIM bridge entirely.
+
+# ── Web framework ──────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# ── LLM provider SDKs (imported but mocked in tests) ──────────────────────
+groq>=0.9.0
+openai>=1.30.0
+anthropic>=0.25.0
+google-genai>=0.5.0
+
+# ── Scientific computing ────────────────────────────────────────────────────
+scipy>=1.12.0
+numpy>=1.26.0
+
+# ── Data analysis & reporting ──────────────────────────────────────────────
+pandas>=2.0.0
+matplotlib>=3.8.0
+reportlab>=4.0.0
+pdfplumber>=0.11.0
+
+# ── Test tooling ────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-timeout>=2.3.0
+httpx>=0.27.0          # TestClient for FastAPI endpoint tests
+
+# NOTE: pythonnet is intentionally excluded — the DWSIM .NET bridge is
+# mocked in all CI test files. Install pythonnet separately for local
+# integration testing against a real DWSIM installation.
