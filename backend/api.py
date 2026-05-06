@@ -83,6 +83,47 @@ def verify_api_key(api_key: str = Depends(_api_key_header)) -> None:
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Prompt injection detection (Chip Huyen Ch.5: defensive prompt engineering)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detect_prompt_injection(text: str) -> Optional[str]:
+    """
+    Lightweight prompt injection detection (Chip Huyen Ch.5: defensive prompt engineering).
+    Returns a warning string if injection patterns detected, None if clean.
+    Does NOT block — logs and warns, then allows through (DWSIM is internal tool).
+    """
+    import re
+    text_lo = text.lower()
+
+    INJECTION_PATTERNS = [
+        # Classic direct injection
+        r"ignore (the |all |previous |above |your )?(previous |above )?(instructions?|prompt|rules?|constraints?)",
+        r"disregard (your |all |the )?(previous |above )?(instructions?|prompt|system)",
+        r"forget (your |all |the )?(previous |above )?(instructions?|training|prompt)",
+        # Role-play attacks
+        r"\bdan\b.*do anything now",
+        r"pretend (you are|to be) (an?|the) .*(unrestricted|uncensored|evil|jailbreak)",
+        r"act as if you have no (restrictions|limits|constraints|safety)",
+        # Repeat attack (training data extraction)
+        r"repeat (the word|this word) .{1,20} (forever|infinitely|100 times)",
+        r"say .{1,20} (over and over|again and again|forever)",
+        # System prompt extraction
+        r"(show|print|reveal|output|tell me) (your|the) system prompt",
+        r"what (are|were) your (original |initial )?(instructions?|prompt|rules?)",
+        # SQL/code injection via natural language
+        r"delete (all|the|every) (data|records?|entries|rows?|tables?)",
+        r"drop (the |all )?(tables?|database|schema)",
+    ]
+
+    for pattern in INJECTION_PATTERNS:
+        if re.search(pattern, text_lo):
+            matched = re.search(pattern, text_lo).group()
+            return f"Possible prompt injection detected: '{matched[:60]}'"
+
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Rate Limiting: simple in-memory token bucket per client IP
 # ─────────────────────────────────────────────────────────────────────────────
 _rate_lock = threading.Lock()
@@ -698,6 +739,17 @@ async def chat_stream(
 
         # ── Evaluation tracking ───────────────────────────────────────────────
         tracker = SessionTracker(req.message, get_eval_log())
+
+        # ── Prompt injection detection ────────────────────────────────────────
+        injection_warning = _detect_prompt_injection(req.message)
+        if injection_warning:
+            import logging
+            logging.getLogger("api.security").warning(
+                "Prompt injection attempt: user=%s pattern=%s",
+                client_ip, injection_warning
+            )
+            # Note: we allow through (internal tool) but log it
+            # For public deployments, return 400 here instead
     except Exception:
         _release_chat_slot()
         raise
@@ -1278,6 +1330,77 @@ try:
 
 except Exception:
     pass  # property_db not available — endpoints simply won't be registered
+
+
+# ── Prompt catalog endpoints (Chip Huyen Ch.5: version and organize prompts) ──
+try:
+    from prompts import list_all_prompts, get_active_system_prompt_meta, PromptRegistry
+
+    @app.get("/prompts")
+    def list_prompts():
+        """List all registered prompt versions (metadata only, no full text)."""
+        return {"success": True, "prompts": list_all_prompts()}
+
+    @app.get("/prompts/active")
+    def active_prompt():
+        """Get metadata for the currently active system prompt."""
+        return {"success": True, "prompt": get_active_system_prompt_meta()}
+
+    @app.get("/prompts/{name}")
+    def get_prompt(name: str, version: str = "latest"):
+        """Get a specific prompt by name and version."""
+        rec = PromptRegistry.get(name, version)
+        if rec is None:
+            return {"success": False, "error": f"Prompt '{name}' v{version} not found"}
+        d = rec.to_dict()
+        d["available_versions"] = [
+            r.version for r in PromptRegistry._registry if r.name == name
+        ]
+        return {"success": True, "prompt": d}
+
+except Exception:
+    pass  # prompts module not available
+
+
+# ── Finetuning dataset endpoints (Chip Huyen Ch.7: finetuning data pipeline) ──
+try:
+    from finetune_data import build_dataset, estimate_finetuning_cost
+
+    @app.get("/finetune/stats")
+    def finetune_stats():
+        """Show finetuning dataset statistics from replay log."""
+        stats = build_dataset(stats_only=True)
+        return {"success": True, **stats}
+
+    @app.post("/finetune/export")
+    def finetune_export(output: str = None, min_score: float = 0.7):
+        """Export high-quality replay turns as OpenAI finetuning JSONL."""
+        result = build_dataset(output=output, min_score=min_score, stats_only=False)
+        return {"success": True, **result}
+
+    @app.get("/finetune/cost")
+    def finetune_cost(n_examples: int = 100, avg_tokens: int = 800):
+        """Estimate OpenAI finetuning cost for N examples."""
+        return {"success": True, **estimate_finetuning_cost(n_examples, avg_tokens)}
+
+except Exception:
+    pass  # finetune_data module not available
+
+
+# ── Extended evaluation metrics endpoint ──────────────────────────────────────
+try:
+    from evaluation import get_eval_log
+
+    @app.get("/eval/extended")
+    def eval_extended_metrics():
+        """Extended quality metrics: EOS accuracy, tool efficiency, SF violations."""
+        log = get_eval_log()
+        base    = log.get_metrics()
+        extended = log.get_extended_metrics()
+        return {"success": True, "base_metrics": base, "extended_metrics": extended}
+
+except Exception:
+    pass
 
 
 @app.get("/compounds")

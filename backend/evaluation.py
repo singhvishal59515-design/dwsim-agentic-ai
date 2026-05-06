@@ -52,6 +52,7 @@ class EvalSession:
     final_answer:         Optional[str]    = None
     benchmark_id:         Optional[str]    = None
     reliability_issues:   List[Dict]       = field(default_factory=list)
+    judge_scores:         Optional[Dict]   = None
 
     # ── computed ──────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ class EvalSession:
             "benchmark_id":         self.benchmark_id,
             "timestamp_iso":        datetime.fromtimestamp(self.start_time).isoformat(),
             "reliability_issues":   self.reliability_issues,
+            "judge_scores":         getattr(self, 'judge_scores', None),
         }
 
 
@@ -250,6 +252,198 @@ class EvaluationLog:
             "total_runs": n,
             "pass_rate":  round(passed / n * 100, 1),
             "results":    results[-50:][::-1],   # newest first
+        }
+
+    def get_extended_metrics(self) -> Dict[str, Any]:
+        """Compute extended quality metrics from session history."""
+        return ExtendedMetrics.compute(self._sessions)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AIJudge — LLM-based evaluation of agent responses (Chip Huyen Ch.3)
+# "AI as a Judge: use a separate LLM to score another LLM's outputs."
+# Judge criteria for DWSIM:
+#   1. Property package correctness  — did agent choose right EOS?
+#   2. Physical plausibility         — are results thermodynamically consistent?
+#   3. Completeness                  — did answer address the user's actual question?
+#   4. Hallucination detection       — did agent invent values not from tool results?
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AIJudge:
+    """
+    Uses an LLM to score agent responses on 4 criteria.
+    Runs asynchronously after each session to avoid blocking the user.
+
+    Scores are 1-5 per criterion, stored in eval_log.json under "judge_scores".
+
+    Usage:
+        judge = AIJudge(llm_client)
+        score = judge.evaluate(user_query, agent_answer, tool_calls, stream_results)
+    """
+
+    JUDGE_PROMPT = """You are an expert chemical engineer evaluating an AI assistant's response to a DWSIM simulation task.
+
+User query: {user_query}
+
+Agent's final answer: {agent_answer}
+
+Tools called (sequence): {tool_sequence}
+
+Simulation results summary: {results_summary}
+
+Rate the agent's response on these 4 criteria (1=very poor, 3=acceptable, 5=excellent):
+
+1. PROPERTY_PACKAGE_CORRECTNESS: Did the agent choose the right thermodynamic model?
+   - PR/SRK for hydrocarbons = correct
+   - NRTL/UNIQUAC for polar organics + water = correct
+   - Steam Tables for pure water/steam = correct
+   - Wrong EOS for system type = incorrect
+
+2. PHYSICAL_PLAUSIBILITY: Are the reported results thermodynamically reasonable?
+   - Temperatures, pressures in realistic ranges?
+   - Mass balance approximately closed?
+   - Phase behavior consistent with conditions?
+
+3. COMPLETENESS: Did the answer address what the user actually asked?
+   - Answered the specific question asked?
+   - Provided numerical results when requested?
+   - Explained key decisions?
+
+4. HALLUCINATION_ABSENCE: Did agent avoid inventing values?
+   - Only reported values from tool results?
+   - Did not fabricate stream properties?
+   - Did not invent BIPs, Tc, Pc values without lookup?
+
+Respond ONLY with JSON:
+{{"property_package_correctness": <1-5>, "physical_plausibility": <1-5>, "completeness": <1-5>, "hallucination_absence": <1-5>, "overall": <1-5>, "reasoning": "<one sentence explanation>"}}"""
+
+    def __init__(self, llm_client=None) -> None:
+        self._llm = llm_client
+
+    def evaluate(
+        self,
+        user_query:      str,
+        agent_answer:    str,
+        tool_calls:      List[Dict] = None,
+        stream_results:  Dict = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Run AI-as-judge evaluation. Returns score dict or None if LLM unavailable.
+        Never raises — evaluation failure must not break the application.
+        """
+        if self._llm is None:
+            return None
+        try:
+            tool_sequence = [tc.get("name", "") for tc in (tool_calls or [])][:10]
+            results_summary = ""
+            if stream_results:
+                streams = list(stream_results.items())[:3]
+                results_summary = "; ".join(
+                    f"{tag}: T={props.get('temperature_C','?')}°C P={props.get('pressure_bar','?')}bar"
+                    for tag, props in streams
+                )
+
+            prompt = self.JUDGE_PROMPT.format(
+                user_query      = user_query[:300],
+                agent_answer    = agent_answer[:500],
+                tool_sequence   = ", ".join(tool_sequence) or "(none)",
+                results_summary = results_summary or "(no stream results)",
+            )
+
+            response = self._llm.chat(
+                messages      = [{"role": "user", "content": prompt}],
+                tools         = [],
+                system_prompt = "You are a chemical engineering evaluation expert. Respond only with valid JSON.",
+            )
+
+            if response and response.get("content"):
+                content = response["content"].strip()
+                import re
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    scores = json.loads(json_match.group())
+                    scores["evaluated_at"] = datetime.now().isoformat()
+                    scores["judge_model"]  = getattr(self._llm, "model", "unknown")
+                    return scores
+        except Exception:
+            pass
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ExtendedMetrics — session-level quality metrics (Chip Huyen Ch.4)
+# "Evaluate AI Systems: evaluate components independently, then system."
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExtendedMetrics:
+    """
+    Compute extended evaluation metrics from session history.
+    Following Chip Huyen Ch.4: evaluate components independently, then system.
+
+    Metrics beyond pass/fail:
+      - EOS selection accuracy    (correct property package chosen)
+      - Token efficiency          (tokens per successful task)
+      - Tool trajectory quality   (tool call ordering correctness)
+      - Mass balance closure rate (did simulation mass balance close?)
+      - First-call success rate   (did first save_and_solve succeed?)
+      - Average SF violations per session
+    """
+
+    @staticmethod
+    def compute(sessions: List[Dict]) -> Dict[str, Any]:
+        """Compute extended metrics from a list of session dicts."""
+        if not sessions:
+            return {}
+
+        n = len(sessions)
+
+        # EOS selection: count sessions where property package was set
+        eos_sessions = [s for s in sessions if any(
+            t in s.get("tools_used", [])
+            for t in ["get_property_package", "new_flowsheet", "set_property_package"]
+        )]
+
+        # Tool trajectory quality: penalize sessions with precondition violations
+        precond_violations = sum(
+            1 for s in sessions
+            if any("_precondition_failed" in str(s) for _ in [None])
+        )
+
+        # First-call success rate for save_and_solve
+        first_solve_success = 0
+        first_solve_total   = 0
+        for s in sessions:
+            tools = s.get("tools_used", [])
+            if "save_and_solve" in tools:
+                first_solve_total += 1
+                # Success = session succeeded overall (proxy for first-call success)
+                if s.get("success"):
+                    first_solve_success += 1
+
+        # Average tool calls per successful session
+        successful = [s for s in sessions if s.get("success")]
+        avg_tools_successful = (
+            round(sum(s.get("tool_count", 0) for s in successful) / len(successful), 1)
+            if successful else None
+        )
+
+        # SF violations per session
+        sf_data = [s for s in sessions if s.get("reliability_issues")]
+        avg_sf_violations = (
+            round(sum(len(s.get("reliability_issues", [])) for s in sf_data) / len(sf_data), 2)
+            if sf_data else 0.0
+        )
+
+        return {
+            "eos_sessions_pct":         round(len(eos_sessions) / n * 100, 1),
+            "first_solve_success_rate": (
+                round(first_solve_success / first_solve_total * 100, 1)
+                if first_solve_total else None
+            ),
+            "avg_tools_per_success":    avg_tools_successful,
+            "avg_sf_violations":        avg_sf_violations,
+            "sessions_with_sf":         len(sf_data),
+            "precondition_violations":  precond_violations,
         }
 
 

@@ -4127,10 +4127,52 @@ class KnowledgeBase:
     def _cache_set(cls, key: str, value: dict) -> None:
         with cls._cache_lock:
             if len(cls._query_cache) >= cls._CACHE_MAX:
-                # Evict oldest entry (insertion-order dict in Python 3.7+)
                 oldest = next(iter(cls._query_cache))
                 del cls._query_cache[oldest]
             cls._query_cache[key] = value
+
+    def _semantic_cache_lookup(self, query: str, top_k: int) -> Optional[dict]:
+        """
+        Semantic cache (Chip Huyen Ch.10: 'semantic caching — similar queries return
+        cached results'). Uses BM25 token overlap between the new query and all cached
+        query keys — no embedding model required.
+
+        A cached result is reused if token overlap (Jaccard similarity) > 0.8,
+        meaning the queries share >80% of their tokens. This correctly matches:
+          - "NRTL BIP ethanol water" == "NRTL binary interaction ethanol water" (NO — different tokens)
+          - "Peng Robinson CO2 methane kij" == "PR kij CO2 CH4" (NO — different tokens)
+          - "NRTL binary parameters ethanol water" == "NRTL binary interaction parameters ethanol water" (YES)
+        Exact-cache misses fall through to BM25 computation.
+        """
+        query_tokens = set(self._tokenize(query.strip().lower()))
+        if len(query_tokens) < 3:
+            return None  # too short for reliable similarity
+
+        JACCARD_THRESHOLD = 0.80
+
+        with self._cache_lock:
+            for cached_key, cached_result in self._query_cache.items():
+                # cached_key format: "query_text|top_k"
+                parts = cached_key.rsplit("|", 1)
+                if len(parts) != 2:
+                    continue
+                cached_query, cached_topk = parts[0], parts[1]
+                if int(cached_topk) != top_k:
+                    continue
+                cached_tokens = set(self._tokenize(cached_query))
+                if not cached_tokens:
+                    continue
+                # Jaccard similarity = |intersection| / |union|
+                intersection = len(query_tokens & cached_tokens)
+                union        = len(query_tokens | cached_tokens)
+                jaccard = intersection / union if union > 0 else 0.0
+                if jaccard >= JACCARD_THRESHOLD:
+                    # Return cached result with semantic cache flag
+                    return {**cached_result, "_cached": True,
+                            "_semantic_cache": True,
+                            "_jaccard_similarity": round(jaccard, 3),
+                            "_matched_query": cached_query}
+        return None
 
     def search(self, query: str, top_k: int = 5) -> dict:
         """
@@ -4157,6 +4199,14 @@ class KnowledgeBase:
         cached = self._cache_get(cache_key)
         if cached is not None:
             return {**cached, "_cached": True}
+
+        # ── Semantic cache lookup (Jaccard token-overlap) ─────────────────────
+        # Book Ch.10: "semantic caching — if similar query in cache, return it."
+        # No embedding needed: BM25 tokenizer gives good semantic overlap proxy
+        # for chemical engineering vocabulary (domain-specific exact terms).
+        sem_cached = self._semantic_cache_lookup(query.strip().lower(), top_k)
+        if sem_cached is not None:
+            return sem_cached
 
         with self._sem_lock:
             use_sem = self._use_sem
