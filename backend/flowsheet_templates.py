@@ -333,6 +333,215 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         },
     },
 
+    # ── INDUSTRIAL CASE STUDIES ──────────────────────────────────────────────
+    "biogas_smr_h2": {
+        "category": "renewables",
+        "description": (
+            "Hydrogen production from biogas via Steam Methane Reforming (SMR). "
+            "Reproduces Ullah, Asaad & Inayat (2025) Digital Chem Eng 14:100205. "
+            "13 unit ops: compressor, heaters, pump, boiler, mixer, equilibrium "
+            "reformer (909°C), HTS-WGSR (350°C), LTS-WGSR (210°C), 4 heat "
+            "recovery exchangers, condenser, PSA, valve, combustor. "
+            "Yields ~64.9% H2 at literature conditions."
+        ),
+        "topology": {
+            "name": "biogas_smr_h2",
+            "property_package": "Peng-Robinson (PR)",
+            "compounds": [
+                "Methane", "Carbon dioxide", "Water", "Hydrogen",
+                "Carbon monoxide", "Nitrogen", "Oxygen",
+            ],
+            "streams": [
+                # Biogas feed: 60% CH4, 40% CO2 at 25°C, 1 bar, 38.5 kg/h
+                _s("BIOGAS-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=38.5, flow_unit="kg/h",
+                   compositions={"Methane": 0.5997, "Carbon dioxide": 0.4006,
+                                 "Nitrogen": 0.0002, "Oxygen": 0.0004,
+                                 "Water": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0}),
+                _s("BIOGAS-COMP"),       # after compressor (16 bar)
+                _s("BIOGAS-HOT"),        # after heater (909°C)
+                # Water feed: 25°C, 1 bar, 46 kg/h
+                _s("WATER-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=46.0, flow_unit="kg/h",
+                   compositions={"Water": 1.0, "Methane": 0.0,
+                                 "Carbon dioxide": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0,
+                                 "Nitrogen": 0.0, "Oxygen": 0.0}),
+                _s("STEAM"),             # after pump+boiler (16 bar, 909°C)
+                _s("REF-F"),             # mixer outlet (reformer feed)
+                _s("REF-P"),             # reformer product (syngas)
+                _s("HTS-F"),             # HTS feed (350°C)
+                _s("HTS-P"),             # HTS product (457°C)
+                _s("LTS-F"),             # LTS feed (210°C)
+                _s("LTS-P"),             # LTS product (238°C)
+                _s("COND-F"),            # condenser feed (38°C)
+                _s("PSA-F"),             # PSA feed (vapor from condenser)
+                _s("CONDENSATE"),        # liquid water out
+                _s("HYDROGEN"),          # H2 product (99.99%)
+                _s("TAIL-GAS"),          # PSA reject
+                _s("TAIL-LP"),           # after let-down valve
+                _s("AIR-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=80.0, flow_unit="kg/h",
+                   compositions={"Oxygen": 0.21, "Nitrogen": 0.79,
+                                 "Methane": 0.0, "Carbon dioxide": 0.0,
+                                 "Water": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0}),
+                _s("COMB-F"),            # combustor feed (after preheater)
+                _s("FLUE-HOT"),          # combustor outlet
+                _s("FLUE-OUT"),          # final flue gas (200°C)
+                # Energy streams
+                _e("Q-COMP"), _e("Q-HEAT"), _e("Q-PUMP"), _e("Q-BOIL"),
+                _e("Q-REF"),  _e("Q-HTS"),  _e("Q-LTS"),
+                _e("Q-HRE1"), _e("Q-HRE2"), _e("Q-HRE3"), _e("Q-HRE4"),
+                _e("Q-PRE"),  _e("Q-COMB"),
+            ],
+            "unit_ops": [
+                _u("COMP-101", "Compressor", outlet_pressure_bar=16.0,
+                   adiabatic_efficiency=0.75),
+                _u("H-101",    "Heater",     outlet_temperature_C=909.0,
+                   delta_p_bar=0.0),
+                _u("P-101",    "Pump",       outlet_pressure_bar=16.0,
+                   adiabatic_efficiency=0.75),
+                _u("B-101",    "Heater",     outlet_temperature_C=909.0,
+                   delta_p_bar=0.0),
+                _u("MIX-101",  "Mixer"),
+                # Equilibrium reformer (isothermal at 909°C)
+                _u("REF-101",  "EquilibriumReactor"),
+                # First heat-recovery exchanger HRE-1 → cools REF-P to 350°C
+                _u("HRE-1",    "Cooler",     outlet_temperature_C=350.0,
+                   delta_p_bar=0.0),
+                # High-temperature water-gas shift (75% CO conversion)
+                _u("HTS-101",  "ConversionReactor", conversion=0.75),
+                _u("HRE-2",    "Cooler",     outlet_temperature_C=210.0,
+                   delta_p_bar=0.05),
+                _u("LTS-101",  "ConversionReactor", conversion=0.75),
+                _u("HRE-3",    "Cooler",     outlet_temperature_C=38.0,
+                   delta_p_bar=0.05),
+                # Two-phase separator: water condensate vs vapor
+                _u("COND-101", "Vessel"),
+                # PSA: 79% H2 separation @ 99.99% purity
+                _u("PSA-101",  "CompoundSeparator",
+                   separation={"Hydrogen": 0.79}),
+                _u("VLV-101",  "Valve",      outlet_pressure_bar=1.0),
+                _u("MIX-102",  "Mixer"),
+                _u("PRE-HEAT", "Heater",     outlet_temperature_C=250.0,
+                   delta_p_bar=0.0),
+                _u("COMB-101", "ConversionReactor", conversion=0.99),
+                _u("HRE-4",    "Cooler",     outlet_temperature_C=200.0,
+                   delta_p_bar=0.0),
+            ],
+            "connections": [
+                # Biogas line: BIOGAS-IN → COMP-101 → BIOGAS-COMP → H-101 → BIOGAS-HOT
+                _c("BIOGAS-IN",   "COMP-101",   0, 0),
+                _c("Q-COMP",      "COMP-101",   0, 1),
+                _c("COMP-101",    "BIOGAS-COMP", 0, 0),
+                _c("BIOGAS-COMP", "H-101",       0, 0),
+                _c("Q-HEAT",      "H-101",       0, 1),
+                _c("H-101",       "BIOGAS-HOT",  0, 0),
+                # Water line: WATER-IN → P-101 → B-101 → STEAM
+                _c("WATER-IN", "P-101",  0, 0),
+                _c("Q-PUMP",   "P-101",  0, 1),
+                _c("P-101",    "B-101",  0, 0),
+                _c("Q-BOIL",   "B-101",  0, 1),
+                _c("B-101",    "STEAM",  0, 0),
+                # Mixer: BIOGAS-HOT + STEAM → REF-F
+                _c("BIOGAS-HOT", "MIX-101", 0, 0),
+                _c("STEAM",      "MIX-101", 0, 1),
+                _c("MIX-101",    "REF-F",   0, 0),
+                # Reformer: REF-F → REF-101 → REF-P
+                _c("REF-F",   "REF-101", 0, 0),
+                _c("Q-REF",   "REF-101", 0, 1),
+                _c("REF-101", "REF-P",   0, 0),
+                # HRE-1: REF-P → HRE-1 → HTS-F
+                _c("REF-P", "HRE-1",  0, 0),
+                _c("Q-HRE1", "HRE-1", 0, 1),
+                _c("HRE-1", "HTS-F",  0, 0),
+                # HTS reactor: HTS-F → HTS-101 → HTS-P
+                _c("HTS-F",   "HTS-101", 0, 0),
+                _c("Q-HTS",   "HTS-101", 0, 1),
+                _c("HTS-101", "HTS-P",   0, 0),
+                # HRE-2: HTS-P → HRE-2 → LTS-F
+                _c("HTS-P", "HRE-2",  0, 0),
+                _c("Q-HRE2","HRE-2",  0, 1),
+                _c("HRE-2", "LTS-F",  0, 0),
+                # LTS reactor: LTS-F → LTS-101 → LTS-P
+                _c("LTS-F",   "LTS-101", 0, 0),
+                _c("Q-LTS",   "LTS-101", 0, 1),
+                _c("LTS-101", "LTS-P",   0, 0),
+                # HRE-3: LTS-P → HRE-3 → COND-F
+                _c("LTS-P",  "HRE-3", 0, 0),
+                _c("Q-HRE3", "HRE-3", 0, 1),
+                _c("HRE-3",  "COND-F", 0, 0),
+                # Condenser: COND-F → COND-101 → PSA-F (vapor) + CONDENSATE (liq)
+                _c("COND-F",   "COND-101", 0, 0),
+                _c("COND-101", "PSA-F",       0, 0),
+                _c("COND-101", "CONDENSATE",  1, 0),
+                # PSA: PSA-F → PSA-101 → HYDROGEN + TAIL-GAS
+                _c("PSA-F",    "PSA-101",  0, 0),
+                _c("PSA-101",  "HYDROGEN", 0, 0),
+                _c("PSA-101",  "TAIL-GAS", 1, 0),
+                # Tail gas line: TAIL-GAS → VLV-101 → MIX-102 ← AIR-IN
+                _c("TAIL-GAS", "VLV-101", 0, 0),
+                _c("VLV-101",  "TAIL-LP", 0, 0),
+                _c("TAIL-LP",  "MIX-102", 0, 0),
+                _c("AIR-IN",   "MIX-102", 0, 1),
+                _c("MIX-102",  "COMB-F",  0, 0),
+                # Pre-heater + combustor: COMB-F → PRE-HEAT → COMB-101 → FLUE-HOT
+                _c("COMB-F",   "PRE-HEAT",   0, 0),
+                _c("Q-PRE",    "PRE-HEAT",   0, 1),
+                _c("PRE-HEAT", "COMB-101",   0, 0),
+                _c("Q-COMB",   "COMB-101",   0, 1),
+                _c("COMB-101", "FLUE-HOT",   0, 0),
+                # HRE-4: FLUE-HOT → HRE-4 → FLUE-OUT
+                _c("FLUE-HOT", "HRE-4",   0, 0),
+                _c("Q-HRE4",   "HRE-4",   0, 1),
+                _c("HRE-4",    "FLUE-OUT",0, 0),
+            ],
+            # Reactions to be configured separately via setup_reaction
+            "reactions": {
+                "REF-101": [
+                    {"name": "SMR",  "type": "equilibrium",
+                     "stoichiometry": {"Methane": -1, "Water": -1,
+                                       "Carbon monoxide": 1, "Hydrogen": 3},
+                     "base_compound": "Methane"},
+                ],
+                "HTS-101": [
+                    {"name": "WGS-HT", "type": "conversion",
+                     "stoichiometry": {"Carbon monoxide": -1, "Water": -1,
+                                       "Carbon dioxide": 1, "Hydrogen": 1},
+                     "base_compound": "Carbon monoxide", "conversion": 0.75},
+                ],
+                "LTS-101": [
+                    {"name": "WGS-LT", "type": "conversion",
+                     "stoichiometry": {"Carbon monoxide": -1, "Water": -1,
+                                       "Carbon dioxide": 1, "Hydrogen": 1},
+                     "base_compound": "Carbon monoxide", "conversion": 0.75},
+                ],
+                "COMB-101": [
+                    {"name": "CH4-COMB", "type": "conversion",
+                     "stoichiometry": {"Methane": -1, "Oxygen": -2,
+                                       "Carbon dioxide": 1, "Water": 2},
+                     "base_compound": "Methane", "conversion": 0.99},
+                    {"name": "CO-COMB", "type": "conversion",
+                     "stoichiometry": {"Carbon monoxide": -1, "Oxygen": -0.5,
+                                       "Carbon dioxide": 1},
+                     "base_compound": "Carbon monoxide", "conversion": 0.99},
+                    {"name": "H2-COMB", "type": "conversion",
+                     "stoichiometry": {"Hydrogen": -1, "Oxygen": -0.5,
+                                       "Water": 1},
+                     "base_compound": "Hydrogen", "conversion": 0.99},
+                ],
+            },
+            "_reference": (
+                "Ullah, K., Asaad, S.M., Inayat, A. (2025). 'Process modelling and "
+                "optimization of hydrogen production from biogas by integrating "
+                "DWSIM with response surface methodology.' Digital Chemical "
+                "Engineering 14, 100205. https://doi.org/10.1016/j.dche.2024.100205"
+            ),
+        },
+    },
+
     # ── RENEWABLES ───────────────────────────────────────────────────────────
     "water_electrolyzer": {
         "category": "renewables",

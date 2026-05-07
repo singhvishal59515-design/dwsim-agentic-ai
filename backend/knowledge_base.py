@@ -4326,6 +4326,65 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
                   "DWSIM v9 documentation Sec. 4.3",
     },
 
+    # ── Biogas-to-Hydrogen SMR (case study from Ullah et al. 2025) ─────────────
+    {
+        "id": "biogas_smr_h2_process",
+        "title": "Biogas-to-Hydrogen via Steam Methane Reforming — Process Design",
+        "text": (
+            "Hydrogen can be produced from biogas (60% CH4, 40% CO2 typical) via "
+            "Steam Methane Reforming (SMR), Water-Gas Shift (WGS), and PSA purification. "
+            "Reference industrial pilot: VABHYOGAZ 100 kg-H2/day plant.\n\n"
+            "PROCESS TOPOLOGY (Ullah, Asaad & Inayat 2025):\n"
+            "  1. Biogas compressor: 1 → 16 bar (adiabatic, ~75% η)\n"
+            "  2. Biogas heater: → 909°C (909°C is the SMR inlet temperature)\n"
+            "  3. Water pump + boiler → steam at 16 bar, 909°C\n"
+            "  4. Mixer: hot biogas + steam at S/C ≈ 3 (mol ratio)\n"
+            "  5. Equilibrium reformer (isothermal, 909°C, 16 bar):\n"
+            "     CH4 + H2O ⇌ CO + 3 H2 (ΔH = +206 kJ/mol, endothermic)\n"
+            "     CO2 + H2 ⇌ CO + H2O   (RWGS, side reaction)\n"
+            "  6. Heat recovery exchanger HRE-1: cool to 350°C\n"
+            "  7. HTS-WGSR (Conversion reactor, 350°C → 457°C, ~75% CO conversion):\n"
+            "     CO + H2O → CO2 + H2 (ΔH = -41 kJ/mol, exothermic)\n"
+            "  8. HRE-2: cool to 210°C\n"
+            "  9. LTS-WGSR (210°C → 238°C, ~75% remaining CO conversion)\n"
+            "  10. HRE-3: cool to 38°C (water dew point)\n"
+            "  11. Two-phase separator: water condensate removed at 15.7 bar\n"
+            "  12. PSA: 79% H2 separation factor, 99.99% H2 purity\n"
+            "  13. Tail gas → let-down valve (1 bar) + air → preheater (250°C) →\n"
+            "      combustor → HRE-4 → flue gas at 200°C\n\n"
+            "TYPICAL OPERATING WINDOW (per Ullah et al. 2025, RSM-CCD optimum):\n"
+            "  Biogas flow rate:   20-60 kg/h (optimum 57 kg/h)\n"
+            "  Steam flow rate:    30-70 kg/h (optimum 33.97 kg/h)\n"
+            "  Reformer T:         700-1000°C (optimum 954.38°C)\n"
+            "  Reformer P:         10-20 bar (optimum 12.52 bar)\n"
+            "  Maximum H2 yield: 65.99% molar fraction\n\n"
+            "VALIDATION TARGETS (Phan et al. 2022 reference data):\n"
+            "  REF-P (reformer outlet) syngas: 37.3% H2, 13.7% CO, 9.7% CO2\n"
+            "  HTS-P: 47.6% H2, 3.4% CO, 20.0% CO2\n"
+            "  LTS-P: 50.1% H2, 0.9% CO, 22.6% CO2\n"
+            "  Final HYDROGEN stream: 100% H2 (after PSA)\n\n"
+            "PROPERTY PACKAGE: Peng-Robinson (PR) is appropriate for this high-T, "
+            "high-P syngas mixture (recommended by Carlson 1996 for non-polar/slightly-polar "
+            "gas mixtures at industrial conditions).\n\n"
+            "TEMPLATE: Use create_from_template with name='biogas_smr_h2' to build "
+            "this entire 13-unit flowsheet in one call. Then setup_reaction on REF-101, "
+            "HTS-101, LTS-101, COMB-101 (stoichiometries are pre-defined in template).\n\n"
+            "OPTIMIZATION STRATEGY: For multi-variable optimization (4 inputs, 1 response), "
+            "bayesian_optimize is more sample-efficient than RSM-CCD. Expected optimum "
+            "should converge to similar yield (~65%) as paper's RSM result."
+        ),
+        "tags": ["biogas", "hydrogen production", "SMR", "steam methane reforming",
+                 "WGS", "water-gas shift", "PSA", "pressure swing adsorption",
+                 "biogas reforming", "renewable hydrogen", "syngas",
+                 "HTS-WGSR", "LTS-WGSR", "Ullah 2025", "Phan 2022", "VABHYOGAZ",
+                 "case study", "industrial pilot", "validation"],
+        "source": (
+            "Ullah, K., Asaad, S.M., Inayat, A. (2025) Digital Chem Eng 14:100205; "
+            "Phan, T.S. et al. (2022) Int. J. Hydrogen Energy 47:42027-42039; "
+            "Park et al. (2023) Energy 265:126273"
+        ),
+    },
+
     # ── Electrolyte thermodynamics: MEA / amine gas treating ──────
     {
         "id": "electrolyte_mea_acid_gas",
