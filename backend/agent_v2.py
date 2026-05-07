@@ -475,8 +475,21 @@ try:
     def _prop_db_batch(compounds, properties=None):
         """Batch lookup — one round trip for N compounds (Review-3 AI Gap 7).
         Saves N-1 LLM iterations vs calling lookup_compound_properties N times."""
+        # LLM sometimes passes a comma-separated string instead of a JSON array.
+        # Coerce to list so the tool never hard-fails on a type mismatch.
+        if isinstance(compounds, str):
+            # Handle "CH4, CO2, H2O" or '["CH4","CO2"]' or "CH4"
+            s = compounds.strip()
+            if s.startswith("["):
+                import json as _json
+                try:
+                    compounds = _json.loads(s)
+                except Exception:
+                    compounds = [x.strip().strip('"\'') for x in s.strip("[]").split(",")]
+            else:
+                compounds = [x.strip().strip('"\'') for x in s.split(",")]
         if not isinstance(compounds, list):
-            return {"success": False, "error": "compounds must be a list of names"}
+            compounds = [str(compounds)]
         db = _PropDB()
         out = {}
         missing = []
@@ -1724,6 +1737,14 @@ class DWSIMAgentV2:
         # error rather than waiting for max_iterations to expire.
         recent_fail_codes: List[set] = []
         last_error_msg = ""
+        # Repetition breaker: track how many times each SUCCESSFUL tool was called.
+        # If a non-destructive tool (discovery/read-only) is called 3+ times in a
+        # row with no other work done, the agent is spinning — break out.
+        _DISCOVERY_TOOLS = {
+            "list_flowsheet_templates", "find_flowsheets", "list_loaded_flowsheets",
+            "recall_memory", "search_knowledge",
+        }
+        _success_tool_counts: Dict[str, int] = {}
 
         for iteration in range(1, _effective_max + 1):
             self._log(f"\n[Iter {iteration}] Calling {self.llm.provider.upper()}…")
@@ -1877,6 +1898,29 @@ class DWSIMAgentV2:
             for tc, r in zip(tool_calls, results):
                 if not r.get("success"):
                     last_error_msg = str(r.get("error") or "")
+                elif tc["name"] in _DISCOVERY_TOOLS:
+                    # Count repetitions of read-only discovery tools
+                    _success_tool_counts[tc["name"]] = (
+                        _success_tool_counts.get(tc["name"], 0) + 1
+                    )
+                else:
+                    # Any productive tool resets the discovery counters
+                    _success_tool_counts.clear()
+            # Repetition breaker: bail if ANY discovery tool called 3+ times
+            for _tname, _cnt in _success_tool_counts.items():
+                if _cnt >= 3:
+                    msg = (
+                        f"Stopped: `{_tname}` was called {_cnt} times without "
+                        f"making progress. The agent appears to be looping on "
+                        f"a read-only tool instead of building the flowsheet.\n\n"
+                        f"**Tip:** Please start fresh — type something like:\n"
+                        f"'Build a biogas-to-hydrogen flowsheet with PR property "
+                        f"package, 38.5 kg/h biogas and 46 kg/h steam at 16 bar.'"
+                    )
+                    self._log(f"[repetition-break] {msg}")
+                    self._history.append({"role": "assistant", "content": msg})
+                    self._emit_turn_metrics(turn_t0, iteration, msg, exhausted=True)
+                    return msg
             recent_fail_codes.append(failed_this_iter)
             if len(recent_fail_codes) > 3:
                 recent_fail_codes.pop(0)
