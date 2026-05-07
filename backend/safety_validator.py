@@ -10,7 +10,7 @@ Silent failure taxonomy (empirically discovered in DWSIM Python interface):
   LOUD   — exception raised or agent reports failure; user always informed
   SILENT — DWSIM converges=True but result is physically wrong; most dangerous
 
-SF catalogue and remediation status (v3 — 9 modes):
+SF catalogue and remediation status (v5 — 13 modes):
   SF-01  CalcMode not set (Heater/Cooler)              → FIXED in bridge (v2.1)
   SF-02  Reversed connection port direction             → FIXED pre-solve (pre_solve_sf02_check)
   SF-03  Unnormalised composition                       → FIXED in bridge (normalise)
@@ -29,6 +29,21 @@ SF catalogue and remediation status (v3 — 9 modes):
            SF-09a  Overall network mass balance error > 2% (feed vs product streams)
            SF-09b  Overall network energy balance error > 10% (duty sum vs stream ΔH)
            SF-09c  Orphaned stream (connected on one side only — dangling topology)
+  SF-10  Supercritical conditions (T>Tc AND P>Pc)      → DETECTED (cubic EOS unreliable)
+         Sub-modes:
+           SF-10   Single-component supercritical
+           SF-10b  Mixture above pseudo-critical (estimated from molar-weighted Tc/Pc)
+  SF-11  Impossible vapor fraction (NaN/Inf/<0/>1)     → DETECTED (flash diverged silently)
+         Sub-modes:
+           SF-11   VF is NaN/Inf (numerical overflow)
+           SF-11b  VF outside [-0.001, 1.001] beyond noise tolerance
+  SF-12  VLLE risk for partially-miscible pairs         → DETECTED pre/post-solve
+         (water + 14 hydrocarbons/oxygenates; flags two-liquid-phase risk
+          if a single liquid phase is reported)
+  SF-13  Phase consistency: T,P vs Antoine Psat vs VF  → DETECTED post-solve
+         Sub-modes:
+           SF-13   Stream P >> Psat but reported as vapor (should be liquid)
+           SF-13b  Stream P << Psat but reported as liquid (should be vapor)
 """
 
 from __future__ import annotations

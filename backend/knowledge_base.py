@@ -4225,6 +4225,159 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
         "source": "Fogler (2016) Elements of CRE; Seider et al. Ch. 12; Perry's 9th ed. Sec. 6",
     },
 
+    # ── Pipe hydraulics & pressure drop ────────────────────────
+    {
+        "id": "pipe_hydraulics_pressure_drop",
+        "title": "Pipe Hydraulics: Darcy-Weisbach, Friction Factors, Two-Phase Flow",
+        "text": (
+            "Pipe pressure drop is calculated by the Darcy-Weisbach equation: "
+            "ΔP = f·(L/D)·(ρv²/2), where f is the Darcy friction factor, L the pipe "
+            "length (m), D the inside diameter (m), ρ the fluid density (kg/m³), "
+            "v the velocity (m/s). Note: Fanning friction factor f_F = f/4. Always "
+            "confirm which convention DWSIM is using.\n\n"
+            "Friction factor selection by Reynolds number Re = ρvD/μ:\n"
+            "  Laminar (Re < 2100): f = 64/Re (independent of roughness)\n"
+            "  Transitional (2100 < Re < 4000): unstable, avoid in design\n"
+            "  Turbulent (Re > 4000): Colebrook equation\n"
+            "    1/√f = -2·log10[(ε/D)/3.7 + 2.51/(Re·√f)]\n"
+            "  ε = pipe roughness: commercial steel 0.046 mm, drawn tubing 0.0015 mm,\n"
+            "  cast iron 0.26 mm, riveted steel 0.9-9 mm.\n\n"
+            "Swamee-Jain explicit approximation (no iteration, good to ±1%):\n"
+            "  f = 0.25 / [log10((ε/D)/3.7 + 5.74/Re^0.9)]²\n\n"
+            "Sizing rules of thumb (use for first-pass design):\n"
+            "  Liquid (water-like)         : 1-3 m/s  (lower for slurries: 1-2 m/s)\n"
+            "  Gas at atmospheric P        : 10-30 m/s\n"
+            "  Gas at high P (>10 bar)     : 5-15 m/s (lower v at higher ρ)\n"
+            "  Steam (low pressure)         : 30-60 m/s\n"
+            "  Steam (high pressure)        : 30-50 m/s\n"
+            "  Two-phase (vapor-liquid)    : avoid >15 m/s mixture velocity\n\n"
+            "TWO-PHASE FLOW (Lockhart-Martinelli method):\n"
+            "  X² = (ΔP/L)_liq / (ΔP/L)_vap\n"
+            "  Two-phase multiplier φ_L² = 1 + C/X + 1/X² (turbulent-turbulent: C=20)\n"
+            "  ΔP_TP = φ_L² · ΔP_liq\n"
+            "  Flow regimes: bubble, plug, slug, annular, mist (Baker chart).\n"
+            "  Rule: keep mixture mass flux G < 2000-3000 kg/m²/s in process pipes.\n\n"
+            "DWSIM Pipe unit op specifies: length, diameter, roughness, elevation, "
+            "and outputs ΔP. After solving, verify outlet P > 0 (SF-06) and that "
+            "the velocity falls within the rule-of-thumb range for the fluid type."
+        ),
+        "tags": ["pipe", "hydraulics", "pressure drop", "Darcy-Weisbach", "Fanning",
+                 "friction factor", "Colebrook", "Reynolds", "Moody", "roughness",
+                 "two-phase flow", "Lockhart-Martinelli", "pipe sizing", "velocity",
+                 "flow regime", "pipe diameter", "head loss"],
+        "source": "Perry's 9th ed., Sec. 6 (Fluid Dynamics); Crane TP-410; "
+                  "Coulson & Richardson Vol. 1, Ch. 3",
+    },
+
+    # ── Distillation: convergence algorithm selection ─────────────
+    {
+        "id": "distill_algorithm_selection",
+        "title": "Distillation Column Convergence: Inside-Out, Burningham-Otto, Sum-Rates",
+        "text": (
+            "DWSIM provides 3 main column solvers; choose based on system characteristics. "
+            "If the default algorithm fails to converge, try a different one BEFORE adjusting "
+            "specs.\n\n"
+            "1. INSIDE-OUT (IO) — DWSIM default. Decouples thermodynamics from MESH.\n"
+            "   Best for: ideal/near-ideal mixtures, narrow-boiling separations,\n"
+            "     hydrocarbon distillation, refinery columns, demethanizers.\n"
+            "   Avoid for: highly non-ideal mixtures, wide-boiling absorbers, reactive\n"
+            "     distillation. Convergence: O(N²) per outer loop, fast (5-15 iterations).\n\n"
+            "2. MODIFIED BURNINGHAM-OTTO (BO) — Simultaneous correction.\n"
+            "   Best for: wide-boiling-range absorbers/strippers, cryogenic columns,\n"
+            "     multicomponent absorbers with light-key recovery > 95%.\n"
+            "   Drawback: slower (10-25 iterations). More robust than IO when liquid\n"
+            "     and vapor profiles differ by orders of magnitude across the column.\n\n"
+            "3. SUM-RATES (SR) — Newton-based simultaneous solver.\n"
+            "   Best for: highly non-ideal mixtures (azeotropic, three-phase),\n"
+            "     reactive distillation, columns with side draws and multiple feeds.\n"
+            "   Drawback: requires good initialization; can diverge if profile is far\n"
+            "     from feasibility. Use after IO or BO has produced a partial profile.\n\n"
+            "DECISION TREE — when IO fails to converge:\n"
+            "  Symptom 'Bubble point not found on stage X' →\n"
+            "    Stage X temperature is far outside Antoine range; switch to BO.\n"
+            "  Symptom 'Mass balance not satisfied' →\n"
+            "    Likely a side-draw or non-ideal κ; switch to SR.\n"
+            "  Symptom 'Maximum iterations reached, residual oscillating' →\n"
+            "    Reflux ratio too close to minimum (R_min); increase R by 20% and retry.\n"
+            "  Symptom 'Negative liquid flow on stage' →\n"
+            "    Feed stage too low or condenser duty insufficient; check feed enthalpy\n"
+            "    and review thermal condition q.\n\n"
+            "INITIALIZATION — strongly affects convergence:\n"
+            "  • Start with reflux ratio R = 1.3 × R_min (Underwood) and N = 1.5 × N_min "
+            "    (Fenske-Gilliland).\n"
+            "  • Provide bubble-point temperature profile (top: dew point of distillate; "
+            "    bottom: bubble point of bottoms; linear interpolation otherwise).\n"
+            "  • For azeotropes (e.g. ethanol-water), use NRTL with VLE BIPs validated against\n"
+            "    experimental data (DECHEMA consistency test).\n"
+            "  • Cold-start trick: run with relaxed tolerance (1e-3), then tighten to 1e-6.\n\n"
+            "MESH equation tolerances in DWSIM:\n"
+            "  Default: 1e-5 for material balance, 1e-4 for energy balance.\n"
+            "  For pre-design exploration: relax to 1e-3 (faster, less robust).\n"
+            "  For final validation: tighten to 1e-7 (slower, more accurate)."
+        ),
+        "tags": ["distillation convergence", "Inside-Out", "IO algorithm",
+                 "Burningham-Otto", "Sum-Rates", "MESH equations",
+                 "column not converging", "rigorous distillation",
+                 "absorber convergence", "azeotropic distillation",
+                 "reactive distillation", "wide-boiling", "tolerance",
+                 "DWSIM column solver", "convergence troubleshooting"],
+        "source": "Seader, Henley & Roper (2011) Separation Process Principles, "
+                  "Ch. 10-11; Holland (1981) Fundamentals of Multicomponent Distillation; "
+                  "DWSIM v9 documentation Sec. 4.3",
+    },
+
+    # ── Electrolyte thermodynamics: MEA / amine gas treating ──────
+    {
+        "id": "electrolyte_mea_acid_gas",
+        "title": "Electrolyte Thermodynamics: MEA / Amine Acid Gas Treating",
+        "text": (
+            "Aqueous amine solutions (MEA, DEA, MDEA, piperazine) absorb acid gases "
+            "(CO₂, H₂S) via reversible chemical reaction — NOT by Henry's-law physical "
+            "absorption alone. Standard PR/SRK/NRTL property packages are INCORRECT for "
+            "these systems and will under-predict CO₂ loading by 50-200%.\n\n"
+            "CORRECT MODELS FOR ELECTROLYTE SYSTEMS:\n"
+            "  • Electrolyte-NRTL (e-NRTL, Chen-Britt 1982) — DWSIM via custom prop package\n"
+            "    or Reaktoro plugin. Handles long-range Pitzer-Debye-Hückel ion-ion forces\n"
+            "    plus short-range NRTL local composition.\n"
+            "  • Pitzer ion-interaction model — for high-ionic-strength brines.\n"
+            "  • Kent-Eisenberg — simplified equilibrium model for amine + CO₂ + H₂S,\n"
+            "    accurate for screening at low loading (<0.4 mol/mol).\n"
+            "  • Deshmukh-Mather — extension of Kent-Eisenberg with activity coefficients,\n"
+            "    accurate to ~0.5 mol/mol loading.\n\n"
+            "KEY REACTIONS (MEA + CO₂):\n"
+            "  Carbamate formation:  2 RNH₂ + CO₂  ⇌  RNHCOO⁻ + RNH₃⁺   (fast, 1°/2° amines)\n"
+            "  Bicarbonate (slow):   RNH₂ + CO₂ + H₂O ⇌ RNH₃⁺ + HCO₃⁻\n"
+            "  Stoichiometric limit: 0.5 mol CO₂ / mol MEA (for primary amines, 1° carbamate)\n"
+            "  MDEA (3°) cannot form carbamate: 1.0 mol CO₂ / mol MDEA (bicarbonate route).\n\n"
+            "TYPICAL OPERATING WINDOW (30 wt% MEA, post-combustion CO₂ capture):\n"
+            "  Absorber: T = 40-60 °C, P = 1-2 bar, lean loading 0.20-0.25 mol/mol,\n"
+            "            rich loading 0.45-0.50 mol/mol\n"
+            "  Stripper: T = 110-125 °C (steam reboiler), P = 1.5-2.0 bar\n"
+            "  Reboiler duty: 3.5-4.2 GJ/ton CO₂ (energy penalty for regeneration)\n"
+            "  CO₂ removal: typically 85-90% (industrial standard)\n"
+            "  Solvent circulation: L/G mass ratio 3-7 in absorber\n\n"
+            "DWSIM IMPLEMENTATION OPTIONS:\n"
+            "  (a) Use DWSIM's built-in Sour Gas (Amines) Property Package if available\n"
+            "      (PR + Kent-Eisenberg). Acceptable for screening.\n"
+            "  (b) Use Reaktoro plugin (in DWSIM Plugins menu) for full e-NRTL.\n"
+            "  (c) For preliminary design only: ChemSep or Aspen if available.\n"
+            "  (d) AVOID: NRTL with default BIPs — will give wrong CO₂ loading and\n"
+            "      undersize absorber/stripper by 30-50%.\n\n"
+            "WARNING TO USER: When user requests MEA/amine + CO₂/H₂S simulation in DWSIM,\n"
+            "ALWAYS verify property package selection. If only PR/NRTL/SRK are available,\n"
+            "warn that absolute loading and reboiler duty will be approximate. Recommend\n"
+            "validation against published data (e.g. Jou et al. 1994; Aronu et al. 2011)."
+        ),
+        "tags": ["electrolyte", "MEA", "amine", "DEA", "MDEA", "CO2 absorption",
+                 "carbon capture", "CCS", "acid gas", "H2S removal", "sour gas",
+                 "e-NRTL", "Kent-Eisenberg", "Pitzer", "carbamate", "loading",
+                 "reboiler duty", "regeneration energy", "absorber stripper",
+                 "Deshmukh-Mather", "Reaktoro"],
+        "source": "Kohl & Nielsen (1997) Gas Purification 5th ed., Ch. 2; "
+                  "Chen & Britt (1982) AIChE J.; Jou, Mather & Otto (1994) Can. J. Chem. Eng.; "
+                  "DWSIM Plugins documentation (Reaktoro)",
+    },
+
 ]
 
 

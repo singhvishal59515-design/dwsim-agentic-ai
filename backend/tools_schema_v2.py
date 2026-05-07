@@ -1707,6 +1707,40 @@ DWSIM_TOOLS = [
         },
     },
     {
+        "name": "batch_lookup_properties",
+        "description": (
+            "Batch version of lookup_compound_properties — look up properties for "
+            "MULTIPLE compounds in a SINGLE call. Use this when building a flowsheet "
+            "with 2+ compounds: it saves 2-5 LLM iterations vs calling "
+            "lookup_compound_properties once per compound. "
+            "Returns a dict keyed by compound name with the same property groups."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["compounds"],
+            "properties": {
+                "compounds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of compound names, aliases, or CAS numbers. "
+                        "Example: ['methanol', 'ethanol', 'water', 'acetone']."
+                    ),
+                },
+                "properties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Which property groups to return for each compound. "
+                        "Same options as lookup_compound_properties: 'critical', "
+                        "'antoine', 'density', 'thermal', 'henry'. "
+                        "Omit for everything."
+                    ),
+                },
+            },
+        },
+    },
+    {
         "name": "lookup_binary_parameters",
         "description": (
             "Look up binary interaction parameters (BIPs) for a pair of compounds. "

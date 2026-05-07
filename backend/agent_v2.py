@@ -114,6 +114,7 @@ _TOOL_TIMEOUT_S = {
     "lookup_binary_parameters":      5.0,
     "compute_vapor_pressure":         5.0,
     "search_compound_database":       5.0,
+    "batch_lookup_properties":       10.0,
 }
 # LLM retry: exponential backoff for transient failures.
 # IMPORTANT: _LLM_BACKOFF_S must have exactly _LLM_MAX_ATTEMPTS - 1 entries.
@@ -130,6 +131,13 @@ _LLM_RETRY_BUDGET_S = 180.0             # 3 minutes max across all attempts
 # On retry attempts, add small temperature to explore different reasoning paths —
 # this helps when the first approach always fails identically (stuck in a loop).
 _RETRY_TEMPERATURES = (0.0, 0.15, 0.25)   # attempt 0, 1, 2 temperatures
+
+# Cross-provider failover chain (Review-3 AI Gap 3).
+# After all per-attempt retries on the primary provider fail, the agent will
+# transparently retry on the next provider in this list (if its API key is set).
+# Order: openai (paid, high-quality) → groq (free, fast Llama) →
+# anthropic (paid, high-quality) → gemini (free Google).
+_FAILOVER_CHAIN = ("openai", "groq", "anthropic", "gemini")
 
 # History limits.
 # Token-aware trimming: 1 token ≈ 4 chars (conservative for mixed content).
@@ -464,6 +472,27 @@ try:
     def _prop_db_search(query: str):
         return _PropDB().search_compound(query)
 
+    def _prop_db_batch(compounds, properties=None):
+        """Batch lookup — one round trip for N compounds (Review-3 AI Gap 7).
+        Saves N-1 LLM iterations vs calling lookup_compound_properties N times."""
+        if not isinstance(compounds, list):
+            return {"success": False, "error": "compounds must be a list of names"}
+        db = _PropDB()
+        out = {}
+        missing = []
+        for c in compounds:
+            r = db.lookup(c, properties)
+            if r.get("success"):
+                out[c] = r
+            else:
+                missing.append(c)
+        return {
+            "success": len(missing) == 0,
+            "results": out,
+            "missing": missing,
+            "count": len(out),
+        }
+
 except Exception:
     def _prop_db_lookup(*a, **kw):
         return {"success": False, "error": "Property database unavailable."}
@@ -472,6 +501,8 @@ except Exception:
     def _prop_db_psat(*a, **kw):
         return {"success": False, "error": "Property database unavailable."}
     def _prop_db_search(*a, **kw):
+        return {"success": False, "error": "Property database unavailable."}
+    def _prop_db_batch(*a, **kw):
         return {"success": False, "error": "Property database unavailable."}
 
 
@@ -661,10 +692,15 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
         2. The description field contains an exact corrective tool call
         3. For SILENT severity: result is convergent but wrong — do NOT present as valid
     • If sf05_auto_corrections > 0: VF noise was auto-corrected; mention to user
-    • All 7 silent failure modes are now caught before or immediately after solve:
-        SF-01 fixed in bridge    SF-02 blocked pre-solve   SF-03 fixed in bridge
-        SF-04 rejected pre-set   SF-05 auto-corrected       SF-06 blocked pre-solve
-        SF-07 blocked pre-solve
+    • All 13 silent failure modes are now caught before or immediately after solve:
+        SF-01 fixed in bridge      SF-02 blocked pre-solve   SF-03 fixed in bridge
+        SF-04 rejected pre-set     SF-05 auto-corrected      SF-06 blocked pre-solve
+        SF-07 blocked pre-solve    SF-08 post-solve duty/η check
+        SF-09 global mass+energy balance violation
+        SF-10 supercritical T>Tc AND P>Pc (cubic EOS may fail)
+        SF-11 NaN/Inf/out-of-range vapor fraction (impossible flash)
+        SF-12 VLLE risk for partially-miscible pairs (water+hydrocarbon, etc.)
+        SF-13 phase consistency: stream P vs Antoine Psat vs reported VF
 
     PROPERTY PACKAGE SELECTION:
     • Water / steam                 → "Steam Tables (IAPWS-IF97)"
@@ -704,6 +740,17 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     • After run_simulation, use get_phase_results to read vapor/liquid split separately.
     • phase values: 'vapor', 'liquid', 'liquid1', 'liquid2', 'solid', 'overall'.
     • Useful after flash drums, condensers, and distillation columns.
+
+    PHASE ENVELOPE / PT DIAGRAM
+    ────────────────────────────
+    • Use calculate_phase_envelope when the user asks about: dew point, bubble point,
+      cricondentherm, cricondenbar, retrograde condensation, two-phase pipeline design,
+      gas-condensate phase behaviour, hydrocarbon phase region, P-T envelope.
+    • Returns the bubble curve, dew curve, and critical point for the active mixture.
+    • Interpret: cricondentherm = max T at which two phases coexist (above this, only
+      vapor regardless of P). Cricondenbar = max P at which two phases coexist.
+      Retrograde region: between critical point and cricondentherm — liquid forms on
+      pressure REDUCTION (counterintuitive; common in gas-condensate reservoirs).
 
     ENERGY STREAMS (v5)
     ────────────────────
@@ -1155,6 +1202,9 @@ class DWSIMAgentV2:
             "search_compound_database":
                                       lambda query:
                                           _prop_db_search(query),
+            "batch_lookup_properties":
+                                      lambda compounds, properties=None:
+                                          _prop_db_batch(compounds, properties),
             # Persistent memory
             "remember_goal":          self._remember_goal,
             "remember_constraint":    self._remember_constraint,
@@ -1359,6 +1409,177 @@ class DWSIMAgentV2:
 
         return result
 
+    # ── Dynamic tool selection (Review-3 AI Gap 1) ────────────────────────────
+    # Tool sets keyed by phase. The LLM sees only the tools relevant to the
+    # current state. Reduces 60+ tools to ~20, which research (Anthropic 2024)
+    # shows materially improves selection accuracy.
+    _TOOLS_DISCOVERY = {
+        "find_flowsheets", "load_flowsheet", "list_loaded_flowsheets",
+        "switch_flowsheet", "list_flowsheet_templates", "create_from_template",
+        "new_flowsheet", "search_knowledge",
+        "lookup_compound_properties", "batch_lookup_properties",
+        "search_compound_database", "lookup_binary_parameters",
+        "compute_vapor_pressure",
+        "remember_goal", "remember_constraint", "recall_memory",
+        "get_available_compounds", "get_available_property_packages",
+    }
+    _TOOLS_BUILD = {
+        "add_object", "connect_streams", "disconnect_streams", "delete_object",
+        "set_stream_property", "set_stream_composition", "set_unit_op_property",
+        "set_property_package", "set_stream_flash_spec",
+        "set_column_property", "set_column_specs", "set_reactor_property",
+        "set_energy_stream", "set_binary_interaction_parameters",
+        "configure_heat_exchanger", "setup_reaction",
+        "list_simulation_objects", "validate_topology", "validate_feed_specs",
+        "search_knowledge", "lookup_compound_properties",
+        "batch_lookup_properties", "lookup_binary_parameters",
+        "save_flowsheet",
+    }
+    _TOOLS_SOLVE = {
+        "save_and_solve", "run_simulation", "check_convergence",
+        "validate_feed_specs", "validate_topology", "initialize_recycle",
+        "list_simulation_objects", "get_property_package",
+        "search_knowledge",
+    }
+    _TOOLS_ANALYZE = {
+        "get_simulation_results", "get_stream_properties", "get_phase_results",
+        "get_object_properties", "get_unit_op_property",
+        "get_column_properties", "get_reactor_properties",
+        "get_energy_stream", "get_transport_properties",
+        "calculate_phase_envelope", "get_binary_interaction_parameters",
+        "parametric_study", "optimize_parameter", "optimize_multivar",
+        "bayesian_optimize", "monte_carlo_study",
+        "pinch_analysis", "generate_report",
+        "search_knowledge", "compute_vapor_pressure",
+        "list_simulation_objects",
+    }
+    _TOOLS_ALWAYS = {
+        # Always exposed regardless of phase — universally useful
+        "search_knowledge", "list_simulation_objects",
+    }
+
+    def _detect_phase(self) -> str:
+        """Inspect bridge state to decide which tool subset is relevant."""
+        try:
+            st = self.bridge.state
+            has_fs = bool(getattr(st, "name", None) or
+                          getattr(st, "active_alias", None) or
+                          getattr(st, "loaded_flowsheets", {}))
+            if not has_fs:
+                return "discovery"
+            has_objects = bool(getattr(st, "streams", []) or
+                               getattr(st, "unit_ops", []))
+            if not has_objects:
+                return "build"
+            # Heuristic: if last tool was a solve, we're in analyze; else build
+            last_solve_idx = -1
+            last_build_idx = -1
+            for i, tc in enumerate(getattr(self, "_turn_tool_timings", []) or []):
+                n = tc.get("name", "")
+                if n in ("save_and_solve", "run_simulation"):
+                    last_solve_idx = i
+                if n in ("add_object", "connect_streams", "set_stream_property",
+                         "set_unit_op_property"):
+                    last_build_idx = i
+            if last_solve_idx > last_build_idx:
+                return "analyze"
+            return "build"
+        except Exception:
+            return "build"
+
+    def _select_active_tools(self, all_tools: list) -> list:
+        """Return only the tools relevant to the current agent phase.
+        Falls back to all_tools on any inspection error so behaviour never
+        degrades to "no tools available"."""
+        try:
+            phase = self._detect_phase()
+            allowed = {
+                "discovery": self._TOOLS_DISCOVERY,
+                "build":     self._TOOLS_BUILD | self._TOOLS_SOLVE,
+                "solve":     self._TOOLS_SOLVE | self._TOOLS_ANALYZE,
+                "analyze":   self._TOOLS_ANALYZE | self._TOOLS_BUILD,
+            }.get(phase, set())
+            allowed = allowed | self._TOOLS_ALWAYS
+            if not allowed:
+                return all_tools
+            filtered = [t for t in all_tools if t.get("name") in allowed]
+            # Safety: if filtering nuked everything (e.g. tool name renamed),
+            # return the full set rather than block the agent.
+            if len(filtered) < 5:
+                return all_tools
+            self._log(f"[ToolSelect] phase={phase} → {len(filtered)}/{len(all_tools)} tools active")
+            return filtered
+        except Exception as exc:
+            _log.debug("dynamic tool selection skipped: %s", exc)
+            return all_tools
+
+    # ── Quality heuristic guard (Review-3 AI Gap 4) ───────────────────────────
+    # Red flag patterns: numerical claims that would normally come from
+    # tool output (temperatures, pressures, duties, conversions).
+    _NUMERIC_CLAIM_RE = _re.compile(
+        r"(?i)\b(?:T|temperature|P|pressure|duty|Q|conversion|yield|"
+        r"flowrate|flow rate|composition|purity|reflux|reboiler|condenser)\b"
+        r"[^.]*?\d+(?:\.\d+)?\s*"
+        r"(?:K|°?C|bar|Pa|kPa|MPa|kW|MW|kg/s|kmol/h|mol/s|%|%w|%v)?"
+    )
+
+    def _apply_quality_guard(self, answer: str, tool_calls: List[Dict]) -> str:
+        """
+        Synchronous heuristic check. Appends a disclaimer when:
+        (a) Answer cites numerical results but NO simulation/lookup tool was called.
+        (b) save_and_solve was called and returned converged=False but the answer
+            does not mention convergence/error.
+        (c) A safety-related tool returned violations but answer omits SF codes.
+        """
+        if not answer or not isinstance(answer, str):
+            return answer
+
+        flags = []
+        tool_names = [tc.get("name", "") for tc in (tool_calls or [])]
+        tool_set = set(tool_names)
+
+        # (a) Numerical claim without backing tool call
+        sim_tools = {
+            "save_and_solve", "run_simulation", "get_simulation_results",
+            "get_stream_properties", "get_phase_results", "lookup_compound_properties",
+            "compute_vapor_pressure", "batch_lookup_properties",
+            "calculate_phase_envelope", "parametric_study", "optimize_parameter",
+            "monte_carlo_study", "bayesian_optimize", "get_column_properties",
+            "get_reactor_properties",
+        }
+        if self._NUMERIC_CLAIM_RE.search(answer) and not (tool_set & sim_tools):
+            flags.append(
+                "numerical values were not verified by a simulation or property-lookup tool"
+            )
+
+        # (b) Convergence failure not mentioned
+        for tc in (tool_calls or []):
+            if tc.get("name") in ("save_and_solve", "run_simulation"):
+                result = tc.get("result") or tc.get("output") or {}
+                if isinstance(result, dict):
+                    if (result.get("converged") is False or
+                        result.get("convergence_errors") or
+                        (isinstance(result.get("safety_status"), str) and
+                         "VIOLATION" in result.get("safety_status", "").upper())):
+                        ans_lo = answer.lower()
+                        if not any(w in ans_lo for w in
+                                   ("converge", "error", "violation", "fail", "warning", "sf-")):
+                            flags.append(
+                                "the simulation reported convergence errors or safety "
+                                "violations that are NOT reflected in the answer above"
+                            )
+                            break
+
+        if not flags:
+            return answer
+
+        disclaimer = (
+            "\n\n---\n"
+            "*Quality note: " + "; ".join(flags) +
+            ". Please verify these results before relying on them.*"
+        )
+        return answer + disclaimer
+
     def _run_ai_judge_async(
         self,
         user_message: str,
@@ -1429,6 +1650,34 @@ class DWSIMAgentV2:
     # ── public API ────────────────────────────────────────────────────────────
 
     def chat(self, user_message: str) -> str:
+        # ── Persistent State Card (Review-3 AI Gap 2) ─────────────────────────
+        # After hierarchical history summarization, the LLM may lose track of
+        # the active flowsheet, compounds, and property package. Inject a
+        # compact "state card" as a system message at the top of each turn
+        # so the model never has to reconstruct state from compressed history.
+        try:
+            st = self.bridge.state
+            fs_name = getattr(st, "name", None) or getattr(st, "flowsheet_name", None) or "none"
+            pp      = getattr(st, "property_package", None) or "not set"
+            comps   = getattr(st, "compounds", []) or []
+            streams = getattr(st, "streams", []) or []
+            unitops = getattr(st, "unit_ops", []) or []
+            comp_str = ", ".join(list(comps)[:6]) + (f" (+{len(comps)-6} more)" if len(comps) > 6 else "")
+            state_card = (
+                f"[CURRENT FLOWSHEET STATE] "
+                f"Name: {fs_name} | Property Package: {pp} | "
+                f"Compounds: {comp_str or 'none'} | "
+                f"Streams: {len(streams)} | Unit ops: {len(unitops)}"
+            )
+            # Avoid duplicate state cards if the previous message was already a state card.
+            if not (self._history and
+                    self._history[-1].get("role") == "system" and
+                    isinstance(self._history[-1].get("content"), str) and
+                    self._history[-1]["content"].startswith("[CURRENT FLOWSHEET STATE]")):
+                self._history.append({"role": "system", "content": state_card})
+        except Exception as _exc:
+            _log.debug("state card injection skipped: %s", _exc)
+
         self._history.append({"role": "user", "content": user_message})
         # Token-aware + message-count trimming (see _trim_history above).
         self._history = _trim_history(self._history)
@@ -1498,9 +1747,13 @@ class DWSIMAgentV2:
                     self._replay_builder.set_prompt(user_message, system)
                 self._replay_builder.add_message_snapshot(self._history)
 
+            # Dynamic tool selection (Review-3 AI Gap 1):
+            # Filter the 60+ tool catalog to ~20 tools relevant to current state.
+            # Improves LLM tool-selection accuracy (research: degrades >25 tools).
+            active_tools = self._select_active_tools(DWSIM_TOOLS)
             response = self._llm_chat_with_retry(
                 messages=self._history,
-                tools=DWSIM_TOOLS,
+                tools=active_tools,
                 system_prompt=system,
             )
 
@@ -1527,6 +1780,14 @@ class DWSIMAgentV2:
                     self._log(f"\nAgent ▶ {text_content[:400]}"
                               + ("…" if len(text_content) > 400 else ""))
                 text_content = _apply_output_filter(text_content)  # Gap 2: safety disclaimer
+                # ── Quality-heuristic guard (Review-3 AI Gap 4) ──────────────
+                # Synchronous, no-LLM heuristic: catches the most common quality
+                # red flags (numerical claims without tool calls, ignored
+                # convergence errors, missing safety status mention). The async
+                # AI-judge below still computes 4-criterion scores into eval_log.
+                text_content = self._apply_quality_guard(
+                    text_content, self._turn_tool_timings
+                )
                 self._history.append({"role": "assistant",
                                       "content": text_content})
                 self._emit_turn_metrics(turn_t0, iteration, text_content)
@@ -1750,9 +2011,90 @@ class DWSIMAgentV2:
           Per-attempt : controlled by provider SDK timeout (_LLM_REQUEST_TIMEOUT_S)
           Aggregate   : _LLM_RETRY_BUDGET_S — total wall-clock across ALL attempts.
                         Prevents a 6-min hang when every provider takes 90 s to fail.
+
+        Cross-provider failover (Review-3 AI Gap 3):
+          After all per-attempt retries are exhausted on the primary provider,
+          try the next provider in _FAILOVER_CHAIN if its API key is available.
+          Order: openai → groq → anthropic → gemini (groq is free + fast).
         """
+        # Single aggregate budget across primary + ALL fallback providers,
+        # so total wall-clock is bounded regardless of how many providers
+        # the failover chain visits.
+        budget_t0 = time.monotonic()
+
+        def _budget_remaining() -> float:
+            return _LLM_RETRY_BUDGET_S - (time.monotonic() - budget_t0)
+
+        # Try primary provider first
+        if _budget_remaining() > 0:
+            resp = self._try_one_provider(
+                messages, tools, system_prompt, self.llm, budget_t0
+            )
+            if resp is not None:
+                return resp
+
+        # Cross-provider failover — only if primary exhausted retries AND
+        # enough budget remains. SDK setup for a new provider can itself
+        # take seconds (DNS, TLS, key validation), so require >= 5s of
+        # remaining budget before attempting failover.
+        _MIN_FAILOVER_BUDGET_S = 5.0
+        for fallback_provider in _FAILOVER_CHAIN:
+            if _budget_remaining() < _MIN_FAILOVER_BUDGET_S:
+                break
+            if fallback_provider == self.llm.provider:
+                continue
+            fb_client = self._build_fallback_client(fallback_provider)
+            if fb_client is None:
+                continue
+            self._log(f"[LLM] primary provider exhausted, failing over to {fallback_provider}")
+            resp = self._try_one_provider(
+                messages, tools, system_prompt, fb_client, budget_t0
+            )
+            if resp is not None:
+                return resp
+        return None
+
+    def _build_fallback_client(self, provider: str):
+        """Build a transient LLMClient for the named provider if a key is available.
+        Returns None if the provider has no key configured (silently skip)."""
+        import os
+        key_env = {
+            "openai":    "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "groq":      "GROQ_API_KEY",
+            "gemini":    "GEMINI_API_KEY",
+        }.get(provider)
+        if not key_env:
+            return None
+        api_key = os.environ.get(key_env, "")
+        if not api_key:
+            return None
+        # Re-use cached fallback clients to avoid repeated SDK setup overhead
+        cache = getattr(self, "_fallback_clients", None)
+        if cache is None:
+            cache = {}
+            self._fallback_clients = cache
+        if provider in cache:
+            return cache[provider]
+        try:
+            from llm_client import LLMClient
+            client = LLMClient(provider=provider, api_key=api_key, temperature=0.0)
+            cache[provider] = client
+            return client
+        except Exception as exc:
+            _log.debug("fallback client setup failed for %s: %s", provider, exc)
+            cache[provider] = None
+            return None
+
+    def _try_one_provider(self, messages, tools, system_prompt, llm_client,
+                          budget_t0=None):
+        """Run the retry loop against a single provider. Returns response or None.
+        If budget_t0 is provided, it is the SHARED start time for the aggregate
+        retry budget across primary + fallback providers; otherwise we start a
+        fresh budget here (legacy behaviour)."""
         last_err   = None
-        budget_t0  = time.monotonic()
+        if budget_t0 is None:
+            budget_t0 = time.monotonic()
 
         for attempt in range(_LLM_MAX_ATTEMPTS):
             # Check aggregate budget before each attempt
@@ -1765,11 +2107,11 @@ class DWSIMAgentV2:
                 break
 
             retry_temp = _RETRY_TEMPERATURES[min(attempt, len(_RETRY_TEMPERATURES) - 1)]
-            _orig_temp = getattr(self.llm, "temperature", 0.0)
+            _orig_temp = getattr(llm_client, "temperature", 0.0)
             if attempt > 0 and retry_temp > 0:
-                self.llm.temperature = retry_temp
+                llm_client.temperature = retry_temp
             try:
-                resp = self.llm.chat(
+                resp = llm_client.chat(
                     messages=messages,
                     tools=tools,
                     system_prompt=system_prompt,
@@ -1779,10 +2121,11 @@ class DWSIMAgentV2:
                 last_err = "provider returned None"
             except Exception as exc:
                 last_err = str(exc)
-                _log.warning("LLM attempt %d failed: %s", attempt + 1, last_err)
+                _log.warning("LLM attempt %d (%s) failed: %s",
+                             attempt + 1, getattr(llm_client, "provider", "?"), last_err)
             finally:
                 if attempt > 0 and retry_temp > 0:
-                    self.llm.temperature = _orig_temp
+                    llm_client.temperature = _orig_temp
 
             if attempt < _LLM_MAX_ATTEMPTS - 1:
                 # Guard against tuple index out of range
@@ -1863,7 +2206,7 @@ class DWSIMAgentV2:
         else:
             print("  Tip: No flowsheet loaded. Example queries:")
             print('    "Find flowsheet files on my computer"')
-            print('    "Load C:\\Users\\hp\\Documents\\HE.dwxmz"\n')
+            print('    "Load C:\\Users\\<your_username>\\Documents\\flowsheet.dwxmz"\n')
 
         while True:
             try:
@@ -2219,7 +2562,7 @@ class DWSIMAgentV2:
             ────────────────────
             Load & inspect:
               "Find all flowsheet files on my computer"
-              "Load C:\\Users\\hp\\Documents\\HE.dwxmz"
+              "Load C:\\Users\\<your_username>\\Documents\\flowsheet.dwxmz"
               "What thermodynamic model is this flowsheet using?"
               "Did all streams converge after the last simulation?"
 
