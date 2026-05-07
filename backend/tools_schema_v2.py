@@ -1823,4 +1823,137 @@ DWSIM_TOOLS = [
             },
         },
     },
+    # ── Industrial Bridge Upgrades ─────────────────────────────────────────────
+    {
+        "name": "robust_solve",
+        "description": (
+            "Enhanced save_and_solve with adaptive convergence strategies for industrial flowsheets. "
+            "Automatically retries with different strategies when standard solve fails. "
+            "Use instead of save_and_solve when dealing with: recycle loops, distillation columns, "
+            "reactive systems, or any flowsheet that failed to converge on the first attempt. "
+            "strategy='robust' tries 3 reload+solve cycles. strategy='aggressive' also perturbs feeds."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "max_attempts": {"type": "integer", "description": "Max solve attempts (default 3)", "default": 3},
+                "strategy": {"type": "string", "enum": ["standard", "robust", "aggressive"],
+                             "description": "standard=1 attempt, robust=3 reloads, aggressive=5 with feed perturbation"},
+            },
+        },
+    },
+    {
+        "name": "initialize_distillation",
+        "description": (
+            "Initialize and converge a rigorous distillation column with automatic algorithm escalation. "
+            "Tries Inside-Out → Burningham-Otto → Sum-Rates algorithms on failure. "
+            "Use this for ALL rigorous DistillationColumn and AbsorptionColumn unit ops. "
+            "Always provide T_top_C (estimated condenser temperature) and T_bot_C (estimated reboiler temperature) "
+            "to seed the temperature profile. Much more reliable than save_and_solve for columns."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["column_tag"],
+            "properties": {
+                "column_tag": {"type": "string", "description": "Tag of the DistillationColumn or AbsorptionColumn"},
+                "T_top_C": {"type": "number", "description": "Estimated top (condenser) temperature in °C"},
+                "T_bot_C": {"type": "number", "description": "Estimated bottom (reboiler) temperature in °C"},
+                "algorithm": {"type": "string", "enum": ["auto", "IO", "BO", "SR"],
+                              "description": "auto=escalate IO→BO→SR on failure, IO=Inside-Out (default), BO=Burningham-Otto (wide-boiling), SR=Sum-Rates (non-ideal)"},
+                "reflux_ratio": {"type": "number", "description": "Reflux ratio to set before solving (optional, reduces 10% each retry)"},
+                "max_attempts": {"type": "integer", "description": "Maximum convergence attempts (default 4)"},
+            },
+        },
+    },
+    {
+        "name": "optimize_constrained",
+        "description": (
+            "Multi-variable optimization WITH inequality constraints — the industrial-grade optimizer. "
+            "Use when you need to meet product specifications while optimizing yield or energy. "
+            "Example: maximize H2 yield subject to CO < 10 ppm and T < 950°C. "
+            "Uses differential evolution with penalty functions for constraint handling. "
+            "constraints format: [{tag, property, unit, operator, value}] where operator is '>=' or '<='."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "observe_tag", "observe_property"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, lower, upper} dicts for decision variables",
+                },
+                "observe_tag": {"type": "string", "description": "Stream or unit op tag to observe as objective"},
+                "observe_property": {"type": "string", "description": "Property to optimize (e.g. mole_fraction_h2)"},
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, operator, value} — e.g. {'tag':'Product','property':'CO_ppm','operator':'<=','value':10}",
+                },
+                "minimize": {"type": "boolean", "description": "True=minimize, False=maximize (default True)"},
+                "max_iter": {"type": "integer", "description": "Max optimizer iterations (default 100)"},
+                "population_size": {"type": "integer", "description": "Differential evolution population size (default 15)"},
+                "seed": {"type": "integer", "description": "Random seed for reproducibility (default 42)"},
+            },
+        },
+    },
+    {
+        "name": "optimize_multiobjective",
+        "description": (
+            "Multi-objective optimization generating a Pareto trade-off curve. "
+            "Use when there are competing objectives: e.g. maximize H2 yield AND minimize steam consumption. "
+            "Returns n_points Pareto-optimal solutions showing the trade-off between objectives. "
+            "Uses weighted sum scalarization with differential evolution at each weight combination."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "objectives"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, lower, upper} decision variables",
+                },
+                "objectives": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, minimize, weight_start, weight_end} objectives. weight_start/end define how the weight varies across the Pareto front.",
+                },
+                "n_points": {"type": "integer", "description": "Number of Pareto front points (default 10)"},
+                "max_iter_per_point": {"type": "integer", "description": "Max optimizer iterations per Pareto point (default 50)"},
+                "seed": {"type": "integer", "description": "Reproducibility seed (default 42)"},
+            },
+        },
+    },
+    {
+        "name": "parametric_study_2d",
+        "description": (
+            "Two-variable parametric study generating a full response surface (RSM-equivalent). "
+            "Use when you need to understand how TWO inputs interact to affect one output. "
+            "Equivalent to what RSM / Central Composite Design captures in papers. "
+            "Returns an n1×n2 matrix of results — use to identify optimal operating region. "
+            "Example: vary temperature [700,800,900,1000°C] × pressure [10,12,14,16 bar] "
+            "→ observe H2 yield (16 simulations total)."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["vary1_tag","vary1_property","vary1_unit","vary1_values",
+                         "vary2_tag","vary2_property","vary2_unit","vary2_values",
+                         "observe_tag","observe_property"],
+            "properties": {
+                "vary1_tag":        {"type": "string"},
+                "vary1_property":   {"type": "string"},
+                "vary1_unit":       {"type": "string"},
+                "vary1_values":     {"type": "array", "items": {"type": "number"},
+                                     "description": "List of values for variable 1"},
+                "vary2_tag":        {"type": "string"},
+                "vary2_property":   {"type": "string"},
+                "vary2_unit":       {"type": "string"},
+                "vary2_values":     {"type": "array", "items": {"type": "number"},
+                                     "description": "List of values for variable 2"},
+                "observe_tag":      {"type": "string"},
+                "observe_property": {"type": "string"},
+            },
+        },
+    },
 ]

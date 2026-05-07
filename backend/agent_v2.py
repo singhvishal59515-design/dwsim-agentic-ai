@@ -101,6 +101,11 @@ _TOOL_TIMEOUT_S = {
     "bayesian_optimize":           900.0,  # 25 evals × ~10s each + GP fit ≈ 250–500s; allow 15min
     "optimize_multivar":           600.0,  # DE: 100 iter × ~2s each = up to 200s; allow 600s
     "optimize_parameter":          300.0,  # scalar: 50 iter
+    "robust_solve":                300.0,   # up to 5 attempts × 60s
+    "initialize_distillation":     600.0,   # 4 algorithm attempts × 120s
+    "optimize_constrained":       3600.0,   # 100 evals × grid
+    "optimize_multiobjective":    3600.0,   # n_points × iterations
+    "parametric_study_2d":        3600.0,   # up to 100 points
     "parametric_study":            300.0,  # N points sequential
     "pinch_analysis":               60.0,  # bridge iteration
     "initialize_recycle":           30.0,
@@ -206,6 +211,8 @@ _REQUIRES_FLOWSHEET = {
     "check_convergence", "validate_feed_specs", "get_property_package",
     "set_property_package", "parametric_study", "optimize_parameter",
     "optimize_multivar", "bayesian_optimize", "monte_carlo_study",
+    "robust_solve", "initialize_distillation", "optimize_constrained",
+    "optimize_multiobjective", "parametric_study_2d",
     "get_column_properties", "set_column_property", "set_column_specs",
     "get_reactor_properties", "set_reactor_property", "setup_reaction",
     "get_phase_results", "get_energy_stream", "set_energy_stream",
@@ -222,7 +229,9 @@ _REQUIRES_OBJECTS = {
     # These additionally require at least one object to exist in the flowsheet
     "save_and_solve", "run_simulation", "parametric_study",
     "optimize_parameter", "optimize_multivar", "bayesian_optimize",
-    "monte_carlo_study", "get_phase_results",
+    "monte_carlo_study", "robust_solve", "initialize_distillation",
+    "optimize_constrained", "optimize_multiobjective", "parametric_study_2d",
+    "get_phase_results",
 }
 
 
@@ -828,10 +837,13 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     • To compare two flowsheets: load both with different aliases, then use
       switch_flowsheet to toggle between them.
 
-    PARAMETRIC STUDY
-    ────────────────
-    • Use parametric_study when the user asks how one output varies with an input.
-    • Present the result as a formatted table with headers.
+    PARAMETRIC STUDY (1D and 2D)
+    ─────────────────────────────
+    • parametric_study: one input → one output. Present as formatted table.
+    • parametric_study_2d: TWO inputs → one output (full response surface).
+      Use when user asks "how do temperature AND pressure affect yield?"
+      Equivalent to RSM / Central Composite Design data in research papers.
+      Returns a matrix: ideal for identifying the optimal operating region.
 
     KNOWLEDGE BASE (RAG)
     ─────────────────────
@@ -845,15 +857,47 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     • Do NOT use knowledge base for pure simulation tasks (set properties,
       run, read results) — use the DWSIM tools directly for those.
 
-    LLM-DRIVEN OPTIMISATION
-    ────────────────────────
-    • For optimisation tasks, prefer the built-in optimize_parameter tool
-      which uses SciPy bounded minimisation automatically.
-    • For complex multi-variable or constrained optimisation that optimize_parameter
-      cannot handle, use parametric_study iteratively to explore and narrow
-      the search space, reporting each iteration to the user.
-    • Always state the objective, decision variable, bounds, and result clearly.
+    INDUSTRIAL OPTIMISATION — DECISION TREE
+    ─────────────────────────────────────────
+    Choose the RIGHT tool for the optimisation task:
+
+    1. SINGLE VARIABLE (e.g. "find optimal temperature"):
+       → optimize_parameter {vary_tag, vary_property, lower, upper, observe_tag, observe_property}
+
+    2. MULTI-VARIABLE, NO CONSTRAINTS (2-5 variables, maximize/minimize):
+       → bayesian_optimize — adaptive, sample-efficient, best for expensive sims
+       → optimize_multivar — differential evolution, good for many variables
+
+    3. MULTI-VARIABLE WITH CONSTRAINTS (industrial: purity ≥ X%, T ≤ Y°C):
+       → optimize_constrained — inequality constraints via penalty functions
+       Example: maximize H2 yield subject to CO ≤ 100 ppm AND P ≤ 20 bar
+
+    4. COMPETING OBJECTIVES (yield vs energy trade-off → Pareto front):
+       → optimize_multiobjective — returns n Pareto-optimal design points
+       Use when user asks "what's the trade-off between X and Y?"
+
+    5. RESPONSE SURFACE (show how two variables interact → like RSM papers):
+       → parametric_study_2d — full n1×n2 matrix of results
+
+    CONVERGENCE STRATEGY — INDUSTRIAL FLOWSHEETS
+    ──────────────────────────────────────────────
+    • ALWAYS use robust_solve instead of save_and_solve for:
+      - Recycle loops (OT_Recycle blocks)
+      - Gas processing trains with many unit ops
+      - Any flowsheet that fails save_and_solve on first attempt
+      strategy='robust'    → 3 reload+solve cycles
+      strategy='aggressive'→ 5 cycles + feed temperature perturbation
+
+    • For DISTILLATION COLUMNS (DistillationColumn, AbsorptionColumn):
+      NEVER use save_and_solve directly. ALWAYS use initialize_distillation.
+      It auto-escalates: Inside-Out → Burningham-Otto → Sum-Rates.
+      Always provide T_top_C (condenser region T) and T_bot_C (reboiler T).
+      Example:
+        initialize_distillation {column_tag:"COL-01", T_top_C:78, T_bot_C:105,
+                                  algorithm:"auto", reflux_ratio:2.5}
+
     • After optimisation, call get_simulation_results to confirm the final state.
+    • Always state the objective, decision variables, bounds, constraints, and result.
 
     ENGINEERING REPORTING
     ──────────────────────
@@ -1131,6 +1175,11 @@ class DWSIMAgentV2:
             "optimize_multivar":      lambda **kw:
                                           self.bridge.optimize_multivar(**kw),
             "bayesian_optimize":      self._bayesian_optimize_with_progress,
+            "robust_solve":           lambda **kw: self.bridge.robust_solve(**kw),
+            "initialize_distillation": lambda **kw: self.bridge.initialize_distillation(**kw),
+            "optimize_constrained":   lambda **kw: self.bridge.optimize_constrained(**kw),
+            "optimize_multiobjective": lambda **kw: self.bridge.optimize_multiobjective(**kw),
+            "parametric_study_2d":    lambda **kw: self.bridge.parametric_study_2d(**kw),
             "pinch_analysis":         lambda min_approach_temp_C=10.0:
                                           self.bridge.pinch_analysis(min_approach_temp_C),
             "initialize_recycle":     lambda recycle_tag, T_guess_C, P_guess_bar,
@@ -1491,6 +1540,8 @@ class DWSIMAgentV2:
         "validate_feed_specs", "validate_topology", "initialize_recycle",
         "list_simulation_objects", "get_property_package",
         "search_knowledge",
+        # Industrial solve tools — always needed in solve phase
+        "robust_solve", "initialize_distillation",
     }
     _TOOLS_ANALYZE = {
         "get_simulation_results", "get_stream_properties", "get_phase_results",
@@ -1498,11 +1549,14 @@ class DWSIMAgentV2:
         "get_column_properties", "get_reactor_properties",
         "get_energy_stream", "get_transport_properties",
         "calculate_phase_envelope", "get_binary_interaction_parameters",
-        "parametric_study", "optimize_parameter", "optimize_multivar",
+        "parametric_study", "parametric_study_2d",
+        "optimize_parameter", "optimize_multivar",
+        "optimize_constrained", "optimize_multiobjective",
         "bayesian_optimize", "monte_carlo_study",
         "pinch_analysis", "generate_report",
         "search_knowledge", "compute_vapor_pressure",
         "list_simulation_objects",
+        "robust_solve", "initialize_distillation",
     }
     _TOOLS_ALWAYS = {
         # Always exposed regardless of phase — universally useful

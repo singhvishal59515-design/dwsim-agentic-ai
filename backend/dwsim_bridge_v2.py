@@ -1245,6 +1245,29 @@ class DWSIMBridgeV2:
     def list_simulation_objects(self) -> Dict[str, Any]:
         if self._flowsheet is None:
             return {"success": False, "error": "No flowsheet loaded"}
+
+        # During build phase (new_flowsheet called, save_and_solve not yet run),
+        # objects are staged in self.state but the DWSIM engine collection may
+        # not reflect them yet.  Return staged state so the agent knows the true
+        # count and does NOT re-add objects thinking they were lost.
+        if self._building:
+            objects = []
+            for tag in self.state.streams:
+                objects.append({"tag": tag, "category": "stream",
+                                 "type": self.state.object_types.get(tag, "MaterialStream")})
+            for tag in self.state.unit_ops:
+                objects.append({"tag": tag, "category": "unit_op",
+                                 "type": self.state.object_types.get(tag, "UnitOperation")})
+            return {
+                "success": True,
+                "count":   len(objects),
+                "objects": objects,
+                "_note":   (
+                    "Flowsheet is in BUILD phase — objects staged but not yet solved. "
+                    "Call save_and_solve when all objects, connections, and properties are set."
+                ),
+            }
+
         coll = self._get_collection()
         if coll is None:
             return {"success": False, "error": "Cannot access SimulationObjects"}
@@ -1963,6 +1986,686 @@ class DWSIMBridgeV2:
                 warnings.append(
                     f"Stream '{tag}' is missing: {', '.join(missing)}")
         return warnings
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # INDUSTRIAL BRIDGE UPGRADES — Added for production-grade flowsheet support
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def robust_solve(
+        self,
+        max_attempts: int = 3,
+        strategy: str = "standard",
+    ) -> Dict[str, Any]:
+        """
+        Enhanced save_and_solve with adaptive convergence strategies.
+        Escalates through strategies on failure for industrial flowsheets.
+
+        strategy:
+          'standard'  – single save+reload+solve (same as save_and_solve)
+          'robust'    – 3 attempts: reload between each, escalating
+          'aggressive'– 5 attempts: reload + reinitialise streams between each
+
+        Returns the last result with all attempt details in '_attempts'.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+
+        attempts_log = []
+        n = max_attempts if strategy in ("robust", "aggressive") else 1
+
+        for attempt in range(1, n + 1):
+            try:
+                # On attempt 2+, reload from disk to reset internal DWSIM state
+                if attempt > 1 and self._flowsheet_path:
+                    self.load_flowsheet(self._flowsheet_path,
+                                        alias=self._active_alias)
+
+                result = self.save_and_solve()
+                attempts_log.append({
+                    "attempt": attempt,
+                    "success": result.get("success"),
+                    "converged": result.get("converged"),
+                })
+
+                if result.get("success") and result.get("converged", True):
+                    result["_attempts"] = attempts_log
+                    result["_strategy"] = strategy
+                    result["_attempts_used"] = attempt
+                    return result
+
+                # On aggressive mode attempt 2+: perturb stream temperatures
+                if strategy == "aggressive" and attempt < n:
+                    self._perturb_feeds_for_convergence()
+
+            except Exception as exc:
+                attempts_log.append({"attempt": attempt, "error": str(exc)})
+
+        # All attempts exhausted — return last result with log
+        last = self.save_and_solve()
+        last["_attempts"] = attempts_log
+        last["_strategy"] = strategy
+        last["_attempts_used"] = n
+        last["_hint"] = (
+            f"Flowsheet did not converge after {n} attempts with strategy='{strategy}'. "
+            "Try: (1) check tear stream specs, (2) reduce recycle ratio, "
+            "(3) initialize distillation column temperature profile manually, "
+            "(4) use a simpler property package for initial convergence."
+        )
+        return last
+
+    def _perturb_feeds_for_convergence(self) -> None:
+        """
+        Slightly perturb feed stream temperatures to escape local non-convergence.
+        Used internally by robust_solve aggressive strategy.
+        Perturbation: ±5 K on all feed streams (streams with no inlet connections).
+        """
+        import random
+        if self._flowsheet is None:
+            return
+        coll = self._get_collection()
+        if coll is None:
+            return
+        try:
+            for guid, obj in self._iter_collection(coll):
+                try:
+                    if "materialstream" not in obj.GetType().Name.lower():
+                        continue
+                    # Only perturb feed streams (GraphicObject.InputConnectors all empty)
+                    go = getattr(obj, "GraphicObject", None)
+                    if go is None:
+                        continue
+                    connectors = getattr(go, "InputConnectors", [])
+                    is_feed = all(not getattr(c, "IsAttached", False)
+                                  for c in connectors)
+                    if not is_feed:
+                        continue
+                    ph = getattr(obj, "Phases", None)
+                    if ph is None:
+                        continue
+                    props = getattr(ph[0], "Properties", None)
+                    if props is None:
+                        continue
+                    t = getattr(props, "temperature", None)
+                    if t is not None and float(t) > 0:
+                        props.temperature = float(t) + random.uniform(-5, 5)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def initialize_distillation(
+        self,
+        column_tag: str,
+        T_top_C: Optional[float] = None,
+        T_bot_C: Optional[float] = None,
+        algorithm: str = "auto",
+        reflux_ratio: Optional[float] = None,
+        max_attempts: int = 4,
+    ) -> Dict[str, Any]:
+        """
+        Initialize and converge a rigorous distillation column for industrial use.
+
+        Sets a linear temperature profile from top to bottom before solving,
+        then escalates through DWSIM's convergence algorithms on failure:
+          IO  → Burningham-Otto → Sum-Rates → reduced-reflux retry
+
+        column_tag  : tag of the DistillationColumn or AbsorptionColumn object
+        T_top_C     : estimated top temperature in °C (condenser region)
+        T_bot_C     : estimated bottom temperature in °C (reboiler region)
+        algorithm   : 'auto' | 'IO' | 'BO' | 'SR'
+        reflux_ratio: if provided, sets reflux ratio before each attempt
+        max_attempts: max convergence attempts (default 4)
+
+        Returns convergence status, algorithm used, and stream results.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+
+        coll = self._get_collection()
+        if coll is None:
+            return {"success": False, "error": "Cannot access flowsheet objects"}
+
+        # Locate the column object
+        col_obj = None
+        tag_cache = self._active_tag_cache()
+        for guid, obj in self._iter_collection(coll):
+            tag = tag_cache.get(str(guid), "")
+            if tag == column_tag:
+                col_obj = obj
+                break
+
+        if col_obj is None:
+            return {"success": False,
+                    "error": f"Column tag '{column_tag}' not found in flowsheet"}
+
+        # DWSIM algorithm codes: 0=IO, 1=BO, 2=SR
+        _ALGO_MAP = {"IO": 0, "BO": 1, "SR": 2,
+                     "inside-out": 0, "burningham-otto": 1, "sum-rates": 2}
+        _ALGO_NAME = {0: "Inside-Out (IO)", 1: "Burningham-Otto (BO)",
+                      2: "Sum-Rates (SR)"}
+
+        if algorithm == "auto":
+            algo_sequence = [0, 1, 2]  # escalate on failure
+        else:
+            start = _ALGO_MAP.get(algorithm.lower(), 0)
+            algo_sequence = [start] + [a for a in [0, 1, 2] if a != start]
+
+        attempts_log = []
+        result = {"success": False, "error": "No attempts made"}
+
+        for attempt_idx, algo_code in enumerate(algo_sequence[:max_attempts]):
+            try:
+                # Set convergence algorithm
+                for attr in ("ConvergenceMethod", "SolvingScheme",
+                             "SolverType", "Algorithm"):
+                    try:
+                        setattr(col_obj, attr, algo_code)
+                    except Exception:
+                        pass
+
+                # Set temperature profile if provided
+                if T_top_C is not None and T_bot_C is not None:
+                    for attr in ("TopTemperature", "CondenserTemperature",
+                                 "TemperatureTop"):
+                        try:
+                            setattr(col_obj, attr, T_top_C + 273.15)
+                            break
+                        except Exception:
+                            pass
+                    for attr in ("BottomTemperature", "ReboilerTemperature",
+                                 "TemperatureBottom"):
+                        try:
+                            setattr(col_obj, attr, T_bot_C + 273.15)
+                            break
+                        except Exception:
+                            pass
+
+                # Set reflux ratio if provided (reduce on retries)
+                if reflux_ratio is not None:
+                    rr = reflux_ratio * (1.0 - 0.1 * attempt_idx)
+                    rr = max(rr, 1.05)  # never below 5% above minimum
+                    for attr in ("RefluxRatio", "L_D_Ratio", "Reflux"):
+                        try:
+                            setattr(col_obj, attr, rr)
+                            break
+                        except Exception:
+                            pass
+
+                # Reload from disk to ensure clean state
+                if self._flowsheet_path and attempt_idx > 0:
+                    self.load_flowsheet(self._flowsheet_path,
+                                        alias=self._active_alias)
+
+                # Solve
+                result = self.save_and_solve()
+                algo_name = _ALGO_NAME.get(algo_code, str(algo_code))
+                attempts_log.append({
+                    "attempt": attempt_idx + 1,
+                    "algorithm": algo_name,
+                    "success": result.get("success"),
+                    "converged": result.get("converged"),
+                })
+
+                if result.get("success"):
+                    result["_algorithm_used"] = algo_name
+                    result["_attempts"] = attempts_log
+                    result["_column_tag"] = column_tag
+                    return result
+
+            except Exception as exc:
+                attempts_log.append({
+                    "attempt": attempt_idx + 1,
+                    "algorithm": _ALGO_NAME.get(algo_code, "?"),
+                    "error": str(exc),
+                })
+
+        result["_attempts"] = attempts_log
+        result["_column_tag"] = column_tag
+        result["_hint"] = (
+            f"Column '{column_tag}' failed to converge with all algorithms "
+            f"({', '.join(_ALGO_NAME[a] for a in algo_sequence[:max_attempts])}). "
+            "Suggestions: (1) provide T_top_C and T_bot_C closer to actual values, "
+            "(2) start with a lower reflux ratio (1.2-1.5 × minimum), "
+            "(3) check feed stage position (feed near middle for binary systems), "
+            "(4) verify NRTL/UNIQUAC BIPs are set for polar pairs."
+        )
+        return result
+
+    def optimize_constrained(
+        self,
+        variables: List[Dict],
+        observe_tag: str,
+        observe_property: str,
+        constraints: Optional[List[Dict]] = None,
+        minimize: bool = True,
+        max_iter: int = 100,
+        population_size: int = 15,
+        seed: int = 42,
+        on_progress=None,
+    ) -> Dict[str, Any]:
+        """
+        Multi-variable optimization with inequality constraints.
+        Critical for industrial applications with product spec requirements.
+
+        variables : [{tag, property, unit, lower, upper}, ...]
+        observe_tag / observe_property : objective to minimize/maximize
+        constraints : [{tag, property, unit, operator, value}, ...]
+            operator: '>=' | '<=' | '==' (approximate)
+            example: [{"tag":"Product","property":"mole_fraction_water",
+                       "unit":"", "operator":"<=", "value":0.005}]
+        minimize  : True = minimize objective
+        max_iter  : differential evolution max iterations
+        seed      : reproducibility
+
+        Returns optimal variables, objective value, constraint satisfaction.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        if not variables:
+            return {"success": False, "error": "variables list is empty"}
+
+        try:
+            from scipy.optimize import differential_evolution
+        except ImportError:
+            return {"success": False,
+                    "error": "scipy not installed: pip install scipy"}
+
+        base_path  = self._flowsheet_path
+        base_alias = self._active_alias
+        bounds     = [(float(v["lower"]), float(v["upper"])) for v in variables]
+        history    = []
+        eval_count = [0]
+        PENALTY    = 1e6   # large penalty for constraint violation
+
+        def _set_vars(x_vec):
+            for v, xi in zip(variables, x_vec):
+                r = self.set_stream_property(
+                    v["tag"], v["property"], float(xi), v.get("unit", ""))
+                if not r["success"]:
+                    self.set_unit_op_property(
+                        v["tag"], v["property"], float(xi))
+
+        def _get_obs():
+            obs_r = self.get_stream_properties(observe_tag)
+            if obs_r.get("success"):
+                val = obs_r["properties"].get(observe_property)
+                if val is not None:
+                    return float(val)
+            # Try as unit op property
+            uo_r = self.get_object_properties(observe_tag)
+            if uo_r.get("success"):
+                val = uo_r.get("properties", {}).get(observe_property)
+                if val is not None:
+                    return float(val)
+            return None
+
+        def _check_constraints():
+            penalty = 0.0
+            satisfied = []
+            if not constraints:
+                return 0.0, []
+            for c in constraints:
+                r = self.get_stream_properties(c["tag"])
+                if not r.get("success"):
+                    r = self.get_object_properties(c["tag"])
+                val = r.get("properties", {}).get(c["property"])
+                if val is None:
+                    penalty += PENALTY
+                    satisfied.append({"constraint": c, "value": None,
+                                      "satisfied": False})
+                    continue
+                val_f   = float(val)
+                limit   = float(c["value"])
+                op      = c.get("operator", ">=")
+                if op == ">=":
+                    viol = max(0.0, limit - val_f)
+                elif op == "<=":
+                    viol = max(0.0, val_f - limit)
+                elif op == "==":
+                    viol = abs(val_f - limit)
+                else:
+                    viol = 0.0
+                penalty  += viol * PENALTY
+                satisfied.append({"constraint": c, "value": round(val_f, 6),
+                                  "satisfied": viol < 1e-6})
+            return penalty, satisfied
+
+        def objective(x_vec):
+            eval_count[0] += 1
+            if base_path:
+                self.load_flowsheet(base_path, alias=base_alias)
+            _set_vars(x_vec)
+            run_r = self.run_simulation()
+            if not run_r.get("success"):
+                return PENALTY
+
+            obj_val = _get_obs()
+            if obj_val is None:
+                return PENALTY
+
+            penalty, _ = _check_constraints()
+            fval = (obj_val if minimize else -obj_val) + penalty
+
+            entry = {
+                "eval": eval_count[0],
+                "variables": {v["tag"]+"."+v["property"]: round(float(xi), 4)
+                              for v, xi in zip(variables, x_vec)},
+                "objective": round(obj_val, 6),
+                "penalty": round(penalty, 2),
+            }
+            history.append(entry)
+
+            if on_progress:
+                try:
+                    on_progress(eval_count[0], x_vec, obj_val,
+                                min(h["objective"] for h in history)
+                                if minimize else
+                                max(h["objective"] for h in history))
+                except Exception:
+                    pass
+            return fval
+
+        result = differential_evolution(
+            objective, bounds,
+            maxiter=max_iter,
+            popsize=population_size,
+            seed=seed,
+            tol=1e-5,
+            mutation=(0.5, 1.5),
+            recombination=0.9,
+        )
+
+        # Final evaluation at optimum
+        if base_path:
+            self.load_flowsheet(base_path, alias=base_alias)
+        _set_vars(result.x)
+        self.run_simulation()
+        final_obj   = _get_obs()
+        _, cons_sat = _check_constraints()
+        stream_res  = self.get_simulation_results().get("stream_results", {})
+
+        opt_vars = {
+            f"{v['tag']}.{v['property']}": {
+                "value": round(float(xi), 6),
+                "unit":  v.get("unit", ""),
+            }
+            for v, xi in zip(variables, result.x)
+        }
+
+        all_satisfied = all(c.get("satisfied", False) for c in cons_sat)
+
+        return {
+            "success":              True,
+            "optimal_variables":    opt_vars,
+            "optimal_objective":    round(final_obj, 6) if final_obj else None,
+            "minimize":             minimize,
+            "constraints":          cons_sat,
+            "all_constraints_satisfied": all_satisfied,
+            "evaluations":          eval_count[0],
+            "scipy_success":        result.success,
+            "stream_results":       stream_res,
+            "history":              history[-20:],  # last 20 for context
+        }
+
+    def optimize_multiobjective(
+        self,
+        variables: List[Dict],
+        objectives: List[Dict],
+        n_points: int = 10,
+        max_iter_per_point: int = 50,
+        seed: int = 42,
+    ) -> Dict[str, Any]:
+        """
+        Multi-objective optimization via weighted sum scalarization.
+        Generates a Pareto front approximation for industrial trade-off analysis.
+
+        objectives : [{tag, property, unit, minimize, weight_start, weight_end}, ...]
+            Each objective is weighted from weight_start to weight_end across n_points.
+            Example: [
+              {"tag":"HYDROGEN","property":"mole_fraction_h2","minimize":False,
+               "weight_start":0.9,"weight_end":0.1},  # maximize H2 purity
+              {"tag":"Q-REF","property":"energy_kW","minimize":True,
+               "weight_start":0.1,"weight_end":0.9},  # minimize energy
+            ]
+        n_points    : number of Pareto front points (default 10)
+        seed        : reproducibility
+
+        Returns pareto_front list of {weights, variables, objective_values}.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        if not objectives or len(objectives) < 2:
+            return {"success": False,
+                    "error": "At least 2 objectives required for multi-objective optimization"}
+
+        pareto_front = []
+        base_path  = self._flowsheet_path
+        base_alias = self._active_alias
+
+        try:
+            from scipy.optimize import differential_evolution
+        except ImportError:
+            return {"success": False,
+                    "error": "scipy not installed: pip install scipy"}
+
+        bounds = [(float(v["lower"]), float(v["upper"])) for v in variables]
+
+        def _get_obj_val(obj_spec: Dict) -> Optional[float]:
+            r = self.get_stream_properties(obj_spec["tag"])
+            if not r.get("success"):
+                r = self.get_object_properties(obj_spec["tag"])
+            return r.get("properties", {}).get(obj_spec["property"])
+
+        for i in range(n_points):
+            alpha = i / max(n_points - 1, 1)  # 0 → 1
+
+            # Interpolate weights for each objective
+            weights = []
+            for obj_spec in objectives:
+                w0 = float(obj_spec.get("weight_start", 1.0))
+                w1 = float(obj_spec.get("weight_end",   0.0))
+                weights.append(w0 + alpha * (w1 - w0))
+
+            # Normalize weights to sum to 1
+            total = sum(abs(w) for w in weights) or 1.0
+            weights = [w / total for w in weights]
+
+            def scalarized(x_vec, _w=weights):
+                if base_path:
+                    self.load_flowsheet(base_path, alias=base_alias)
+                for v, xi in zip(variables, x_vec):
+                    r = self.set_stream_property(
+                        v["tag"], v["property"], float(xi), v.get("unit",""))
+                    if not r["success"]:
+                        self.set_unit_op_property(
+                            v["tag"], v["property"], float(xi))
+                run_r = self.run_simulation()
+                if not run_r.get("success"):
+                    return 1e9
+                total_obj = 0.0
+                for wj, obj_spec in zip(_w, objectives):
+                    val = _get_obj_val(obj_spec)
+                    if val is None:
+                        return 1e9
+                    sign = 1.0 if obj_spec.get("minimize", True) else -1.0
+                    total_obj += wj * sign * float(val)
+                return total_obj
+
+            res = differential_evolution(
+                scalarized, bounds,
+                maxiter=max_iter_per_point,
+                seed=seed + i,
+                tol=1e-4,
+                popsize=10,
+            )
+
+            # Evaluate objectives at optimum
+            if base_path:
+                self.load_flowsheet(base_path, alias=base_alias)
+            for v, xi in zip(variables, res.x):
+                r = self.set_stream_property(
+                    v["tag"], v["property"], float(xi), v.get("unit",""))
+                if not r["success"]:
+                    self.set_unit_op_property(
+                        v["tag"], v["property"], float(xi))
+            self.run_simulation()
+
+            obj_vals = {}
+            for obj_spec in objectives:
+                val = _get_obj_val(obj_spec)
+                key = f"{obj_spec['tag']}.{obj_spec['property']}"
+                obj_vals[key] = round(float(val), 6) if val is not None else None
+
+            pareto_front.append({
+                "point_index":       i + 1,
+                "weights":           {f"{o['tag']}.{o['property']}": round(w, 4)
+                                      for o, w in zip(objectives, weights)},
+                "optimal_variables": {f"{v['tag']}.{v['property']}":
+                                      round(float(xi), 6)
+                                      for v, xi in zip(variables, res.x)},
+                "objective_values":  obj_vals,
+                "scipy_success":     res.success,
+            })
+
+        return {
+            "success":      True,
+            "pareto_front": pareto_front,
+            "n_points":     len(pareto_front),
+            "objectives":   [f"{o['tag']}.{o['property']}" for o in objectives],
+            "variables":    [f"{v['tag']}.{v['property']}" for v in variables],
+        }
+
+    def parametric_study_2d(
+        self,
+        vary1_tag: str,
+        vary1_property: str,
+        vary1_unit: str,
+        vary1_values: List[float],
+        vary2_tag: str,
+        vary2_property: str,
+        vary2_unit: str,
+        vary2_values: List[float],
+        observe_tag: str,
+        observe_property: str,
+        on_progress=None,
+    ) -> Dict[str, Any]:
+        """
+        Two-variable parametric study generating a response surface matrix.
+        Equivalent to RSM Central Composite Design data generation.
+
+        vary1 / vary2   : input variables (tag, property, unit, list of values)
+        observe         : output to record at each combination
+        on_progress     : optional callback(i, j, n1, n2, val) for SSE streaming
+
+        Returns:
+          matrix: list of {vary1, vary2, observe} dicts (n1 × n2 combinations)
+          summary: min/max/argmin/argmax across the surface
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        if not vary1_values or not vary2_values:
+            return {"success": False, "error": "Both vary1_values and vary2_values required"}
+
+        base_path  = self._flowsheet_path
+        base_alias = self._active_alias
+        matrix     = []
+        n1, n2     = len(vary1_values), len(vary2_values)
+        total      = n1 * n2
+        count      = 0
+
+        for i, v1 in enumerate(vary1_values):
+            for j, v2 in enumerate(vary2_values):
+                count += 1
+                try:
+                    # Reload clean state
+                    if base_path:
+                        self.load_flowsheet(base_path, alias=base_alias)
+
+                    # Set variable 1
+                    r1 = self.set_stream_property(
+                        vary1_tag, vary1_property, float(v1), vary1_unit)
+                    if not r1["success"]:
+                        self.set_unit_op_property(
+                            vary1_tag, vary1_property, float(v1))
+
+                    # Set variable 2
+                    r2 = self.set_stream_property(
+                        vary2_tag, vary2_property, float(v2), vary2_unit)
+                    if not r2["success"]:
+                        self.set_unit_op_property(
+                            vary2_tag, vary2_property, float(v2))
+
+                    # Solve
+                    run_r = self.run_simulation()
+                    obs_val = None
+                    if run_r.get("success"):
+                        obs_r = self.get_stream_properties(observe_tag)
+                        if obs_r.get("success"):
+                            obs_val = obs_r["properties"].get(observe_property)
+                        if obs_val is None:
+                            uo_r = self.get_object_properties(observe_tag)
+                            if uo_r.get("success"):
+                                obs_val = (uo_r.get("properties", {})
+                                           .get(observe_property))
+
+                    row = {
+                        vary1_property: round(float(v1), 6),
+                        vary2_property: round(float(v2), 6),
+                        observe_property: round(float(obs_val), 6)
+                                          if obs_val is not None else None,
+                        "converged": run_r.get("success", False),
+                        "point_index": count,
+                    }
+                    matrix.append(row)
+
+                    if on_progress:
+                        try:
+                            on_progress(i, j, n1, n2, obs_val)
+                        except Exception:
+                            pass
+
+                except Exception as exc:
+                    matrix.append({
+                        vary1_property: float(v1),
+                        vary2_property: float(v2),
+                        observe_property: None,
+                        "converged": False,
+                        "error": str(exc),
+                        "point_index": count,
+                    })
+
+        # Summary statistics
+        valid_vals = [r[observe_property] for r in matrix
+                      if r.get(observe_property) is not None]
+        summary = {}
+        if valid_vals:
+            best_row = (min if True else max)(
+                [r for r in matrix if r.get(observe_property) is not None],
+                key=lambda r: r[observe_property])
+            worst_row = max(
+                [r for r in matrix if r.get(observe_property) is not None],
+                key=lambda r: r[observe_property])
+            summary = {
+                "min_value":    round(min(valid_vals), 6),
+                "max_value":    round(max(valid_vals), 6),
+                "min_at":       {vary1_property: best_row[vary1_property],
+                                  vary2_property: best_row[vary2_property]},
+                "max_at":       {vary1_property: worst_row[vary1_property],
+                                  vary2_property: worst_row[vary2_property]},
+                "success_rate": f"{len(valid_vals)}/{total}",
+            }
+
+        return {
+            "success":        True,
+            "matrix":         matrix,
+            "n_points":       total,
+            "vary1":          {"tag": vary1_tag, "property": vary1_property,
+                                "values": vary1_values},
+            "vary2":          {"tag": vary2_tag, "property": vary2_property,
+                                "values": vary2_values},
+            "observe":        {"tag": observe_tag, "property": observe_property},
+            "summary":        summary,
+        }
 
     # ── ACC-5: optimize parameter ─────────────────────────────────────────────
 
@@ -3580,12 +4283,21 @@ class DWSIMBridgeV2:
             if tag not in self.state.unit_ops:
                 self.state.unit_ops.append(tag)
 
+        n_streams = len(self.state.streams)
+        n_ops     = len(self.state.unit_ops)
         return {
-            "success":  True,
-            "tag":      tag,
-            "type":     enum_name,
-            "category": category,
-            "message":  f"Added {enum_name} '{tag}' to flowsheet",
+            "success":       True,
+            "tag":           tag,
+            "type":          enum_name,
+            "category":      category,
+            "staged_streams": n_streams,
+            "staged_unit_ops": n_ops,
+            "message": (
+                f"Added {enum_name} '{tag}'. "
+                f"Staged so far: {n_streams} stream(s), {n_ops} unit op(s). "
+                f"Do NOT call list_simulation_objects to verify — "
+                f"objects are invisible to it until save_and_solve is called."
+            ),
         }
 
     # ── Pre-solve SF checker ─────────────────────────────────────────────────
