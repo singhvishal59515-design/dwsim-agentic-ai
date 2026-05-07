@@ -235,13 +235,18 @@ def _check_tool_preconditions(name: str, bridge) -> Optional[dict]:
     if name not in _REQUIRES_FLOWSHEET:
         return None  # tool has no preconditions
 
-    # Check if a flowsheet is active
+    # Check if a flowsheet is active.  FlowsheetState has `name` and `path`
+    # populated by new_flowsheet/load_flowsheet — those are the canonical
+    # signals.  (Older code checked active_alias/flowsheet_name which don't
+    # exist on FlowsheetState — that bug silently blocked add_object on
+    # every parallel batch where the LLM ordered add_object before
+    # new_flowsheet.)
     has_flowsheet = False
     try:
         fs = bridge.state
-        has_flowsheet = bool(getattr(fs, "active_alias", None) or
-                             getattr(fs, "flowsheet_name", None) or
-                             getattr(fs, "loaded_flowsheets", {}))
+        has_flowsheet = bool(getattr(fs, "name", "") or
+                             getattr(fs, "path", "") or
+                             getattr(bridge, "_active_alias", None))
     except Exception:
         has_flowsheet = False
 
@@ -860,11 +865,21 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
 
     MANDATORY WORKFLOW — FOLLOW THIS ORDER
     ───────────────────────────────────────
-    Before creating ANY simulation, you MUST:
-    1. Call lookup_compound_properties for each key compound to verify
-       Tc, Pc, omega, and boiling point — never guess these values.
-    2. Call lookup_binary_parameters for polar component pairs (alcohols,
-       ketones, acids + water) to get NRTL/UNIQUAC BIPs.
+    ⚡ TEMPLATE SHORTCUT: If the user asks to "use template X" or "build
+    from template X", call create_from_template {name:"X"} IMMEDIATELY —
+    skip ALL property lookups below. Templates have compounds, property
+    package, streams, unit ops, and reactions pre-configured.
+    Available templates: biogas_smr_h2, flash_separation, shortcut_distillation,
+    absorber, heater_cooler, heat_exchanger, pump_valve, conversion_reactor,
+    gibbs_reactor, reactor_recycle, stream_blender, water_electrolyzer.
+
+    For building flowsheets FROM SCRATCH (no template), you MUST:
+    1. Call batch_lookup_properties with ALL key compounds in ONE call
+       (not lookup_compound_properties one-at-a-time) to verify Tc, Pc,
+       omega, and boiling point. Example:
+       batch_lookup_properties {compounds: ["Methane","CO2","Water","Hydrogen"]}
+    2. Call lookup_binary_parameters ONLY for polar pairs (alcohols,
+       ketones, acids + water). Skip for pure hydrocarbon / gas systems.
     3. Choose the correct property package based on lookup results:
        - Hydrocarbons / gas mixtures → Peng-Robinson (PR)
        - Polar organics + water → NRTL or UNIQUAC
@@ -1466,7 +1481,9 @@ class DWSIMAgentV2:
         "configure_heat_exchanger", "setup_reaction",
         "list_simulation_objects", "validate_topology", "validate_feed_specs",
         "search_knowledge", "lookup_compound_properties",
-        "batch_lookup_properties", "lookup_binary_parameters",
+        "lookup_binary_parameters",
+        # batch_lookup_properties excluded from build phase — compound research
+        # should happen before new_flowsheet, not during add_object loops.
         "save_flowsheet",
     }
     _TOOLS_SOLVE = {
@@ -1490,6 +1507,10 @@ class DWSIMAgentV2:
     _TOOLS_ALWAYS = {
         # Always exposed regardless of phase — universally useful
         "search_knowledge", "list_simulation_objects",
+        # Templates must always be available — user can call them at any point
+        "create_from_template", "list_flowsheet_templates",
+        # Batch property lookup should always be available
+        "batch_lookup_properties",
     }
 
     def _detect_phase(self) -> str:
@@ -1762,8 +1783,13 @@ class DWSIMAgentV2:
         # If a non-destructive tool (discovery/read-only) is called 3+ times in a
         # row with no other work done, the agent is spinning — break out.
         _DISCOVERY_TOOLS = {
+            # Only pure list/read-only tools trigger the repetition breaker.
+            # create_from_template, batch_lookup_properties are productive — excluded.
             "list_flowsheet_templates", "find_flowsheets", "list_loaded_flowsheets",
-            "recall_memory", "search_knowledge",
+            "recall_memory",
+            "list_simulation_objects",   # read-only; calling 3+ times means agent is stuck
+            "get_property_package",      # same: static after load
+            "validate_topology",         # topology doesn't change without an add/connect
         }
         _success_tool_counts: Dict[str, int] = {}
 
@@ -1851,6 +1877,33 @@ class DWSIMAgentV2:
 
             self._history.append(self.llm.assistant_turn(response))
 
+            # Reorder tool calls: when an LLM sends a parallel batch like
+            # [add_object, add_object, new_flowsheet, ...], the add_objects
+            # would run BEFORE new_flowsheet and silently no-op (no flowsheet
+            # exists yet).  Sort so init tools run first, then state-changers,
+            # then read-only tools.  Stable sort preserves LLM ordering within
+            # each priority bucket.
+            _PRIORITY = {
+                "new_flowsheet":      0,
+                "load_flowsheet":     0,
+                "create_from_template": 0,
+                "switch_flowsheet":   1,
+                "add_object":         2,
+                "connect_streams":    3,
+                "set_stream_property":      4,
+                "set_stream_composition":   4,
+                "set_unit_op_property":     4,
+                "set_property_package":     4,
+                "set_column_property":      4,
+                "set_reactor_property":     4,
+                "set_energy_stream":        4,
+                "save_flowsheet":     5,
+                "save_and_solve":     6,
+                "run_simulation":     6,
+            }
+            tool_calls = sorted(tool_calls,
+                                key=lambda tc: _PRIORITY.get(tc.get("name",""), 9))
+
             # Deduplicate: if the LLM sends multiple new_flowsheet calls in one
             # batch (parallel tool calls), execute only the first one and skip
             # the rest with a "already initialized" reply — prevents purge-loop.
@@ -1930,9 +1983,10 @@ class DWSIMAgentV2:
                 else:
                     # Any productive tool resets the discovery counters
                     _success_tool_counts.clear()
-            # Repetition breaker: bail if ANY discovery tool called 3+ times
+            # Repetition breaker: bail if ANY discovery tool called 2+ times
+            # (lowered from 3 — 2 repetitions is enough to confirm spinning)
             for _tname, _cnt in _success_tool_counts.items():
-                if _cnt >= 3:
+                if _cnt >= 2:
                     msg = (
                         f"Stopped: `{_tname}` was called {_cnt} times without "
                         f"making progress. The agent appears to be looping on "
