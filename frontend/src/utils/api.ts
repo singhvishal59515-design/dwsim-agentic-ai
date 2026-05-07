@@ -223,9 +223,13 @@ export const api = {
 
   // ── eval ─────────────────────────────────────────────────────────────────
   evalMetrics:    () => _get('/eval/metrics'),
+  evalExtended:   () => _get('/eval/extended'),
   evalReliability: () => _get('/eval/reliability'),
   evalFailures:   () => _get('/eval/failures'),
   evalClear:      () => _delete('/eval/clear'),
+  evalSessions:   (limit = 50, offset = 0, minScore = 0) =>
+    _get(`/eval/sessions?limit=${limit}&offset=${offset}&min_score=${minScore}`),
+  evalSessionDetail: (id: string) => _get(`/eval/sessions/${encodeURIComponent(id)}`),
 
   // ── new analysis tools ────────────────────────────────────────────────────
   pinchAnalysis:     (minApproachTempC = 10) =>

@@ -23,12 +23,13 @@ import AccuracyTab         from './components/AccuracyTab';
 import DiagnosticsPanel    from './components/DiagnosticsPanel';
 import MemoryPanel         from './components/MemoryPanel';
 import AblationPanel       from './components/AblationPanel';
+import JudgeDashboard      from './components/JudgeDashboard';
 import { useChat }         from './hooks/useChat';
 import { useSimulation }   from './hooks/useSimulation';
 import { ParametricData, ReportCard, DiagramData, StreamProps } from './types';
 
 type RightTab = 'streams' | 'convergence' | 'unitops' | 'reports' | 'parametric' | 'montecarlo' | 'bayesian' | 'economics' | 'diagram' | 'pinch' | 'compare' | 'accuracy';
-type LeftTab  = 'browser' | 'controls' | 'templates' | 'compounds' | 'safety' | 'memory';
+type LeftTab  = 'browser' | 'controls' | 'templates' | 'compounds' | 'safety' | 'memory' | 'judge';
 type UnitSys  = 'si' | 'imperial';
 
 // ── colour helpers ─────────────────────────────────────────────────────────────
@@ -289,6 +290,7 @@ export default function App() {
               ['compounds', '⚗'],
               ['memory',    '🧠'],
               ['safety',    '🛡'],
+              ['judge',     '⚖️'],
             ] as [LeftTab, string][]).map(([key, label]) => (
               <TabBtn key={key} label={label} active={leftTab===key} dark={dark} onClick={()=>setLeftTab(key)} />
             ))}
@@ -344,6 +346,9 @@ export default function App() {
             )}
             {leftTab==='safety' && (
               <SafetyPanel dark={dark} />
+            )}
+            {leftTab==='judge' && (
+              <JudgeDashboard dark={dark} />
             )}
           </div>
         </div>

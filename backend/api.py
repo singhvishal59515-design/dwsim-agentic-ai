@@ -2157,6 +2157,39 @@ def eval_metrics():
     return get_eval_log().get_metrics()
 
 
+@app.get("/eval/sessions")
+def eval_sessions(limit: int = 50, offset: int = 0, min_score: float = 0.0):
+    """Return paginated list of evaluation sessions with judge scores.
+    Each session includes: id, query, tool_count, success, duration_s, judge_scores."""
+    log  = get_eval_log()
+    sessions = log._sessions  # list[dict], newest last
+    # Reverse so newest first
+    all_s = list(reversed(sessions))
+    # Optional filter by minimum overall judge score
+    if min_score > 0:
+        all_s = [s for s in all_s
+                 if (s.get("judge_scores") or {}).get("overall", 5.0) >= min_score]
+    total  = len(all_s)
+    page   = all_s[offset: offset + limit]
+    return {
+        "success": True,
+        "total":   total,
+        "offset":  offset,
+        "limit":   limit,
+        "sessions": page,
+    }
+
+
+@app.get("/eval/sessions/{session_id}")
+def eval_session_detail(session_id: str):
+    """Return full detail for a single session including raw tool records."""
+    log = get_eval_log()
+    for s in reversed(log._sessions):
+        if s.get("session_id") == session_id:
+            return {"success": True, "session": s}
+    raise HTTPException(404, f"Session {session_id!r} not found")
+
+
 # ── Ablation study endpoints ──────────────────────────────────────────────────
 
 @app.get("/ablation/configs")
