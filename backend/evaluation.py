@@ -53,6 +53,13 @@ class EvalSession:
     benchmark_id:         Optional[str]    = None
     reliability_issues:   List[Dict]       = field(default_factory=list)
     judge_scores:         Optional[Dict]   = None
+    # Human feedback (LangSmith-equivalent ground truth)
+    feedback:       Optional[str]   = None   # "thumbs_up" | "thumbs_down" | None
+    feedback_note:  Optional[str]   = None   # optional text reason
+    # Token usage + cost tracking
+    tokens_in:      int             = 0      # prompt tokens total for session
+    tokens_out:     int             = 0      # completion tokens total
+    cost_usd:       float           = 0.0   # estimated cost in USD
 
     # ── computed ──────────────────────────────────────────────────────────────
 
@@ -87,6 +94,11 @@ class EvalSession:
             "timestamp_iso":        datetime.fromtimestamp(self.start_time).isoformat(),
             "reliability_issues":   self.reliability_issues,
             "judge_scores":         getattr(self, 'judge_scores', None),
+            "feedback":       self.feedback,
+            "feedback_note":  self.feedback_note,
+            "tokens_in":      self.tokens_in,
+            "tokens_out":     self.tokens_out,
+            "cost_usd":       round(self.cost_usd, 6),
         }
 
 
@@ -177,6 +189,28 @@ class EvaluationLog:
         self._sessions   = []
         self._bm_results = []
         self._save()
+
+    def record_feedback(self, session_id: str, feedback: str,
+                        note: str = "") -> bool:
+        """Store human thumbs-up/down against a session. Returns True if found."""
+        for s in self._sessions:
+            if s.get("session_id") == session_id:
+                s["feedback"]      = feedback   # "thumbs_up" or "thumbs_down"
+                s["feedback_note"] = note
+                self._save()
+                return True
+        return False
+
+    def record_tokens(self, session_id: str, tokens_in: int,
+                      tokens_out: int, cost_usd: float) -> None:
+        """Accumulate token usage for a session."""
+        for s in self._sessions:
+            if s.get("session_id") == session_id:
+                s["tokens_in"]  = s.get("tokens_in",  0) + tokens_in
+                s["tokens_out"] = s.get("tokens_out", 0) + tokens_out
+                s["cost_usd"]   = round(s.get("cost_usd", 0.0) + cost_usd, 6)
+                self._save()
+                return
 
     # ── aggregate metrics ─────────────────────────────────────────────────────
 

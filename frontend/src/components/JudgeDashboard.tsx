@@ -162,7 +162,7 @@ function SessionDetailModal({
             </div>
 
             {/* Meta row */}
-            <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 11, color: DIM }}>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 11, color: DIM, flexWrap: 'wrap' }}>
               <span>{detail.timestamp_iso?.slice(0, 16).replace('T', ' ')}</span>
               <span>⏱ {detail.duration_s?.toFixed(1)}s</span>
               <span>🔧 {detail.tool_count} tools</span>
@@ -170,6 +170,15 @@ function SessionDetailModal({
               <span style={{ color: detail.success ? '#22c55e' : '#ef4444' }}>
                 {detail.success ? '✔ Succeeded' : '✗ Failed'}
               </span>
+              {(detail.tokens_in || 0) > 0 && (
+                <span style={{ color: '#f59e0b' }}>
+                  🪙 {detail.tokens_in?.toLocaleString()} in + {detail.tokens_out?.toLocaleString()} out
+                  {detail.cost_usd > 0 && ` = $${detail.cost_usd.toFixed(5)}`}
+                </span>
+              )}
+              {detail.feedback && (
+                <span>{detail.feedback === 'thumbs_up' ? '👍 Approved' : '👎 Rejected'}</span>
+              )}
             </div>
 
             {/* Judge scores */}
@@ -254,6 +263,7 @@ export default function JudgeDashboard({ dark }: { dark: boolean }) {
   const [selected,  setSelected]  = useState<string | null>(null);
   const [filterMin, setFilterMin] = useState(0);
   const [page,      setPage]      = useState(0);
+  const [search,    setSearch]    = useState('');
   const PER_PAGE = 20;
   const totalRef = useRef(0);
 
@@ -278,20 +288,37 @@ export default function JudgeDashboard({ dark }: { dark: boolean }) {
   useEffect(() => { load(); }, [load]);
 
   // Trend data from sessions (newest last → oldest first for chart)
-  const overallTrend = [...sessions]
+  // Apply client-side search filter
+  const filteredSessions = search.trim()
+    ? sessions.filter(s =>
+        s.user_message.toLowerCase().includes(search.toLowerCase()) ||
+        (s.tools_used || []).some(t => t.toLowerCase().includes(search.toLowerCase()))
+      )
+    : sessions;
+
+  const overallTrend = [...filteredSessions]
     .filter(s => s.judge_scores?.overall != null)
     .reverse()
     .map(s => s.judge_scores!.overall!);
 
-  const successRate = sessions.length > 0
-    ? Math.round((sessions.filter(s => s.success).length / sessions.length) * 100)
+  const successRate = filteredSessions.length > 0
+    ? Math.round((filteredSessions.filter(s => s.success).length / filteredSessions.length) * 100)
     : null;
 
   const avgOverall = overallTrend.length > 0
     ? overallTrend.reduce((a, b) => a + b, 0) / overallTrend.length
     : null;
 
-  const scoredCount = sessions.filter(s => s.judge_scores?.overall != null).length;
+  const scoredCount = filteredSessions.filter(s => s.judge_scores?.overall != null).length;
+
+  // Token / cost aggregates
+  const totalCost   = filteredSessions.reduce((a, s) => a + ((s as any).cost_usd   || 0), 0);
+  const totalTokens = filteredSessions.reduce((a, s) => a + ((s as any).tokens_in  || 0)
+                                                          + ((s as any).tokens_out || 0), 0);
+
+  // Feedback counts
+  const thumbsUp   = filteredSessions.filter(s => (s as any).feedback === 'thumbs_up').length;
+  const thumbsDown = filteredSessions.filter(s => (s as any).feedback === 'thumbs_down').length;
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
@@ -320,13 +347,32 @@ export default function JudgeDashboard({ dark }: { dark: boolean }) {
         </div>
       )}
 
+      {/* ── Search bar ────────────────────────────────────────────────────── */}
+      <div style={{ padding: '8px 10px 0' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 Search sessions by query or tool…"
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: PNL, border: `1px solid ${BRD}`, borderRadius: 7,
+            color: TXT, padding: '6px 10px', fontSize: 11, outline: 'none',
+          }}
+        />
+      </div>
+
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 10 }}>
         {[
-          { label: 'Sessions',      value: totalRef.current || sessions.length, color: '#38bdf8' },
+          { label: 'Sessions',      value: search ? `${filteredSessions.length}/${totalRef.current || sessions.length}` : (totalRef.current || sessions.length), color: '#38bdf8' },
           { label: 'Success rate',  value: successRate != null ? `${successRate}%` : '—', color: '#22c55e' },
           { label: 'Avg quality',   value: avgOverall != null ? `${avgOverall.toFixed(2)}/5` : '—', color: '#a855f7' },
-          { label: 'Scored',        value: `${scoredCount}/${sessions.length}`, color: '#f59e0b' },
+          { label: 'Scored',        value: `${scoredCount}/${filteredSessions.length}`, color: '#f59e0b' },
+          { label: 'Total cost',    value: totalCost > 0 ? `$${totalCost.toFixed(4)}` : 'free', color: '#f59e0b' },
+          { label: 'Total tokens',  value: totalTokens > 0 ? `${(totalTokens/1000).toFixed(1)}k` : '—', color: '#38bdf8' },
+          { label: 'Thumbs up',     value: thumbsUp   > 0 ? `${thumbsUp} 👍`   : '—', color: '#22c55e' },
+          { label: 'Thumbs down',   value: thumbsDown > 0 ? `${thumbsDown} 👎` : '—', color: '#ef4444' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
             background: PNL, border: `1px solid ${BRD}`, borderRadius: 8, padding: '8px 10px',
@@ -443,7 +489,7 @@ export default function JudgeDashboard({ dark }: { dark: boolean }) {
             No sessions recorded yet. Start chatting with the agent!
           </div>
         )}
-        {sessions.map(s => (
+        {filteredSessions.map(s => (
           <div
             key={s.session_id}
             onClick={() => setSelected(s.session_id)}
@@ -474,6 +520,17 @@ export default function JudgeDashboard({ dark }: { dark: boolean }) {
               <span style={{ fontSize: 10, color: DIM }}>🔧 {s.tool_count}</span>
               {s.failed_tools > 0 && (
                 <span style={{ fontSize: 10, color: '#f87171' }}>✗{s.failed_tools}</span>
+              )}
+              {(s as any).tokens_in > 0 && (
+                <span style={{ fontSize: 10, color: '#475569' }}>
+                  🪙 {(((s as any).tokens_in + (s as any).tokens_out) / 1000).toFixed(1)}k
+                  {(s as any).cost_usd > 0 && ` $${(s as any).cost_usd.toFixed(4)}`}
+                </span>
+              )}
+              {(s as any).feedback && (
+                <span style={{ fontSize: 12 }}>
+                  {(s as any).feedback === 'thumbs_up' ? '👍' : '👎'}
+                </span>
               )}
               <span style={{ fontSize: 10, color: DIM, marginLeft: 'auto' }}>
                 {s.timestamp_iso?.slice(0, 16).replace('T', ' ')}

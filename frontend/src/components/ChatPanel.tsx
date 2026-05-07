@@ -33,17 +33,18 @@ const EXAMPLES = [
 ];
 
 interface Props {
-  dark:          boolean;
-  messages:      ChatMessage[];
-  loading:       boolean;
-  streamingText: string;
-  onSend:        (t: string) => void;
-  onReset:       () => void;
-  onExport:      () => void;
-  inputRef?:     React.RefObject<HTMLTextAreaElement>;
+  dark:           boolean;
+  messages:       ChatMessage[];
+  loading:        boolean;
+  streamingText:  string;
+  onSend:         (t: string) => void;
+  onReset:        () => void;
+  onExport:       () => void;
+  inputRef?:      React.RefObject<HTMLTextAreaElement>;
+  onFeedback?:    (msgIndex: number, fb: 'thumbs_up' | 'thumbs_down') => void;
 }
 
-export default function ChatPanel({ dark, messages, loading, streamingText, onSend, onReset, onExport, inputRef }: Props) {
+export default function ChatPanel({ dark, messages, loading, streamingText, onSend, onReset, onExport, inputRef, onFeedback }: Props) {
   const [input, setInput] = useState('');
   const internalRef = useRef<HTMLTextAreaElement>(null);
   const ref = inputRef || internalRef;
@@ -144,7 +145,7 @@ export default function ChatPanel({ dark, messages, loading, streamingText, onSe
           );
 
           return (
-            <div key={i} style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               <div
                 style={{
                   background: AINP, border: `1px solid ${dark ? '#334155' : '#e2e8f0'}`,
@@ -153,6 +154,38 @@ export default function ChatPanel({ dark, messages, loading, streamingText, onSe
                 }}
                 dangerouslySetInnerHTML={{ __html: renderMd(msg.content) }}
               />
+              {/* Human feedback buttons — LangSmith-equivalent ground truth */}
+              {onFeedback && (
+                <div style={{ display: 'flex', gap: 4, paddingLeft: 4 }}>
+                  <button
+                    onClick={() => onFeedback(i, 'thumbs_up')}
+                    title="Good answer"
+                    style={{
+                      background: msg.feedback === 'thumbs_up' ? '#14532d' : 'none',
+                      border: `1px solid ${msg.feedback === 'thumbs_up' ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')}`,
+                      borderRadius: 5, padding: '1px 7px', cursor: 'pointer', fontSize: 12,
+                      color: msg.feedback === 'thumbs_up' ? '#22c55e' : DIM,
+                      transition: 'all 0.15s',
+                    }}
+                  >👍</button>
+                  <button
+                    onClick={() => onFeedback(i, 'thumbs_down')}
+                    title="Bad answer"
+                    style={{
+                      background: msg.feedback === 'thumbs_down' ? '#1c0a0a' : 'none',
+                      border: `1px solid ${msg.feedback === 'thumbs_down' ? '#ef4444' : (dark ? '#334155' : '#e2e8f0')}`,
+                      borderRadius: 5, padding: '1px 7px', cursor: 'pointer', fontSize: 12,
+                      color: msg.feedback === 'thumbs_down' ? '#ef4444' : DIM,
+                      transition: 'all 0.15s',
+                    }}
+                  >👎</button>
+                  {msg.sessionId && (
+                    <span style={{ fontSize: 9, color: dark ? '#1e3a5f' : '#cbd5e1', alignSelf: 'center', marginLeft: 2 }}>
+                      {msg.feedback ? (msg.feedback === 'thumbs_up' ? '✓ saved' : '✓ saved') : ''}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

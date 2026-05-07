@@ -61,10 +61,12 @@ export interface ToolCallEvent {
 }
 
 export interface ChatMessage {
-  role:    'user' | 'assistant' | 'tool' | 'error';
-  content: string;
-  tools?:  ToolCallEvent[];
-  ts?:     number;
+  role:       'user' | 'assistant' | 'tool' | 'error';
+  content:    string;
+  tools?:     ToolCallEvent[];
+  ts?:        number;
+  sessionId?: string;                          // backend session_id for feedback
+  feedback?:  'thumbs_up' | 'thumbs_down';    // human feedback recorded
 }
 
 export interface LLMStatus {

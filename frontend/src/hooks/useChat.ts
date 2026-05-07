@@ -14,6 +14,7 @@ export interface UseChatReturn {
   reset:          () => void;
   exportChat:     () => void;
   undo:           () => Promise<void>;
+  sendFeedback:   (msgIndex: number, feedback: 'thumbs_up' | 'thumbs_down') => Promise<void>;
 }
 
 const STORAGE_KEY = 'dwsim_react_chat';
@@ -29,7 +30,8 @@ export function useChat(
   const [lastSafety,    setLastSafety]    = useState<{ status: string; warnings: SafetyWarning[] } | null>(null);
   const [liveResults,   setLiveResults]   = useState<Record<string, StreamProps>>({});
   const [undoStack,     setUndoStack]     = useState<PropertyChange[]>([]);
-  const abortRef = useRef<(() => void) | null>(null);
+  const abortRef     = useRef<(() => void) | null>(null);
+  const lastSessionId = useRef<string>('');   // session_id from latest done event
 
   // Session recovery from localStorage
   useEffect(() => {
@@ -113,8 +115,13 @@ export function useChat(
 
         } else if (evt.type === 'done') {
           setStreamingText('');
-          const answer = typeof evt.data === 'string' ? evt.data : '';
-          setMessages(prev => [...prev, { role: 'assistant', content: answer, ts: Date.now() }]);
+          const answer    = typeof evt.data === 'string' ? evt.data : '';
+          const sessionId = (evt as any).session_id || '';
+          if (sessionId) lastSessionId.current = sessionId;
+          setMessages(prev => [
+            ...prev,
+            { role: 'assistant', content: answer, ts: Date.now(), sessionId },
+          ]);
           resolve();
 
         } else if (evt.type === 'error') {
@@ -175,9 +182,28 @@ export function useChat(
     } catch { /* ignore */ }
   }, [undoStack]);
 
+  // Human feedback — LangSmith-equivalent ground truth signal
+  const sendFeedback = useCallback(async (
+    msgIndex: number,
+    feedback: 'thumbs_up' | 'thumbs_down',
+  ) => {
+    const msg = messages[msgIndex];
+    if (!msg) return;
+    // Use sessionId stored on the message, or fall back to lastSessionId
+    const sid = msg.sessionId || lastSessionId.current;
+    if (!sid) return;
+    try {
+      await api.evalFeedback(sid, feedback);
+      // Optimistically update UI
+      setMessages(prev => prev.map((m, i) =>
+        i === msgIndex ? { ...m, feedback } : m
+      ));
+    } catch { /* silently ignore — feedback is best-effort */ }
+  }, [messages]);
+
   return {
     messages, loading, streamingText, lastSafety, liveResults,
     undoStack, canUndo: undoStack.length > 0,
-    sendMessage, reset, exportChat, undo,
+    sendMessage, reset, exportChat, undo, sendFeedback,
   };
 }

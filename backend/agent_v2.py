@@ -139,6 +139,27 @@ _RETRY_TEMPERATURES = (0.0, 0.15, 0.25)   # attempt 0, 1, 2 temperatures
 # anthropic (paid, high-quality) → gemini (free Google).
 _FAILOVER_CHAIN = ("openai", "groq", "anthropic", "gemini")
 
+# ── Token cost estimator (Review-3 LangSmith feature) ────────────────────────
+# Costs in USD per 1M tokens (input, output). Free providers → 0.
+_TOKEN_COSTS_USD_PER_1M: Dict[str, tuple] = {
+    "gpt-4o":              (5.00,  15.00),
+    "gpt-4o-mini":         (0.15,   0.60),
+    "gpt-4.1":             (2.00,   8.00),
+    "gpt-4.1-mini":        (0.40,   1.60),
+    "claude-opus-4":       (15.00,  75.00),
+    "claude-sonnet-4-5":   (3.00,  15.00),
+    "claude-sonnet-4-6":   (3.00,  15.00),
+    "claude-haiku-4-5":    (0.80,   4.00),
+    # groq, gemini, ollama are free (or unknown cost) → 0
+}
+
+def _estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    """Estimate USD cost for one LLM call. Returns 0 for free/unknown models."""
+    for prefix, (c_in, c_out) in _TOKEN_COSTS_USD_PER_1M.items():
+        if model.startswith(prefix):
+            return (tokens_in * c_in + tokens_out * c_out) / 1_000_000
+    return 0.0
+
 # History limits.
 # Token-aware trimming: 1 token ≈ 4 chars (conservative for mixed content).
 # Groq Llama-3.3-70b: 32k context. Reserve ~8k for system prompt + tools schema
@@ -1834,7 +1855,10 @@ class DWSIMAgentV2:
             # batch (parallel tool calls), execute only the first one and skip
             # the rest with a "already initialized" reply — prevents purge-loop.
             _seen_init_tools: set = set()
-            _ONCE_PER_BATCH = {"new_flowsheet", "save_and_solve"}
+            # list_flowsheet_templates returns a static list — calling it twice
+            # per turn wastes iterations and causes 9× spin loops.
+            _ONCE_PER_BATCH = {"new_flowsheet", "save_and_solve",
+                               "list_flowsheet_templates"}
 
             results = []
             for tc in tool_calls:
@@ -2161,6 +2185,23 @@ class DWSIMAgentV2:
                     system_prompt=system_prompt,
                 )
                 if resp is not None:
+                    # Accumulate token usage for eval_log (LangSmith token tracking)
+                    _usg = resp.get("_usage", {})
+                    if _usg:
+                        try:
+                            from evaluation import get_eval_log
+                            log = get_eval_log()
+                            sid = getattr(self, "_session_id", None)
+                            if sid:
+                                _tok_in  = int(_usg.get("tokens_in",  0))
+                                _tok_out = int(_usg.get("tokens_out", 0))
+                                _cost    = _estimate_cost(
+                                    getattr(llm_client, "model", ""),
+                                    _tok_in, _tok_out
+                                )
+                                log.record_tokens(sid, _tok_in, _tok_out, _cost)
+                        except Exception:
+                            pass
                     return resp
                 last_err = "provider returned None"
             except Exception as exc:
@@ -2367,10 +2408,39 @@ class DWSIMAgentV2:
         "seed":           int,
     }
 
+    # Fields that must be lists of strings. If the LLM sends a plain string
+    # (e.g. "CH4, CO2, H2O" or '["CH4","H2O"]'), coerce it before the tool call
+    # so the Anthropic API validator never sees a wrong type and raises
+    # "compounds must be a list of names".
+    _ARG_COERCE_LIST = {"compounds", "reactions", "values"}
+
+    @staticmethod
+    def _coerce_to_str_list(v) -> list:
+        """Convert any LLM-provided value to a list of strings."""
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):
+                try:
+                    import json as _j
+                    parsed = _j.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x) for x in parsed]
+                except Exception:
+                    pass
+            # Comma-separated string: "CH4, CO2, H2O"
+            return [x.strip().strip("\"'") for x in s.split(",") if x.strip()]
+        return [str(v)]
+
     def _coerce_arguments(self, name: str, arguments: dict) -> dict:
         """Coerce argument types to match expected signatures, fixing common LLM mistakes."""
         coerced = {}
         for k, v in arguments.items():
+            # List-of-strings fields: coerce before schema validation
+            if k in self._ARG_COERCE_LIST and v is not None:
+                coerced[k] = self._coerce_to_str_list(v)
+                continue
             expected = self._ARG_COERCE.get(k)
             if expected is None or v is None:
                 coerced[k] = v

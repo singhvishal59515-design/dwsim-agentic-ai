@@ -230,6 +230,8 @@ export const api = {
   evalSessions:   (limit = 50, offset = 0, minScore = 0) =>
     _get(`/eval/sessions?limit=${limit}&offset=${offset}&min_score=${minScore}`),
   evalSessionDetail: (id: string) => _get(`/eval/sessions/${encodeURIComponent(id)}`),
+  evalFeedback: (sessionId: string, feedback: 'thumbs_up' | 'thumbs_down', note = '') =>
+    _post(`/eval/feedback/${encodeURIComponent(sessionId)}`, { feedback, note }),
 
   // ── new analysis tools ────────────────────────────────────────────────────
   pinchAnalysis:     (minApproachTempC = 10) =>

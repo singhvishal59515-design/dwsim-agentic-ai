@@ -520,10 +520,17 @@ class LLMClient:
                 "name":      tc.function.name,
                 "arguments": args,
             })
+        _usage = {}
+        if hasattr(resp, "usage") and resp.usage:
+            _usage = {
+                "tokens_in":  getattr(resp.usage, "prompt_tokens", 0) or 0,
+                "tokens_out": getattr(resp.usage, "completion_tokens", 0) or 0,
+            }
         return {"content":     content,
                 "tool_calls":  tool_calls,
                 "stop_reason": resp.choices[0].finish_reason,
-                "_raw":        msg}
+                "_raw":        msg,
+                "_usage":      _usage}
 
     def _try_next_groq_model(self) -> bool:
         try:
@@ -569,7 +576,8 @@ class LLMClient:
             elif getattr(part, "text", None):
                 txts.append(part.text)
         return {"content": "".join(txts), "tool_calls": tcs,
-                "stop_reason": "tool_use" if tcs else "stop", "_raw": resp}
+                "stop_reason": "tool_use" if tcs else "stop", "_raw": resp,
+                "_usage": {}}
 
     def _chat_gemini_old(self, messages, tools, system_prompt) -> Dict[str, Any]:
         with warnings.catch_warnings():
@@ -598,7 +606,8 @@ class LLMClient:
             elif getattr(part, "text", None):
                 txts.append(part.text)
         return {"content": "".join(txts), "tool_calls": tcs,
-                "stop_reason": "tool_use" if tcs else "stop", "_raw": resp}
+                "stop_reason": "tool_use" if tcs else "stop", "_raw": resp,
+                "_usage": {}}
 
     def _try_next_gemini_model(self) -> bool:
         try:
@@ -674,7 +683,8 @@ class LLMClient:
         return {"content":     content,
                 "tool_calls":  tool_calls,
                 "stop_reason": choice.get("finish_reason", "stop"),
-                "_raw":        msg}
+                "_raw":        msg,
+                "_usage":      {}}
 
     # ── OPENAI (paid) ─────────────────────────────────────────────────────────
 
@@ -694,8 +704,15 @@ class LLMClient:
         for tc in (msg.tool_calls or []):
             tcs.append({"id": tc.id, "name": tc.function.name,
                          "arguments": json.loads(tc.function.arguments)})
+        _usage = {}
+        if hasattr(resp, "usage") and resp.usage:
+            _usage = {
+                "tokens_in":  getattr(resp.usage, "prompt_tokens", 0) or 0,
+                "tokens_out": getattr(resp.usage, "completion_tokens", 0) or 0,
+            }
         return {"content": msg.content or "", "tool_calls": tcs,
-                "stop_reason": resp.choices[0].finish_reason, "_raw": msg}
+                "stop_reason": resp.choices[0].finish_reason, "_raw": msg,
+                "_usage": _usage}
 
     # ── ANTHROPIC (paid) ──────────────────────────────────────────────────────
 
@@ -718,8 +735,15 @@ class LLMClient:
             elif blk.type == "tool_use":
                 tcs.append({"id": blk.id, "name": blk.name,
                              "arguments": blk.input})
+        _usage = {}
+        if hasattr(resp, "usage") and resp.usage:
+            _usage = {
+                "tokens_in":  getattr(resp.usage, "input_tokens",  0) or 0,
+                "tokens_out": getattr(resp.usage, "output_tokens", 0) or 0,
+            }
         return {"content": "".join(txts), "tool_calls": tcs,
-                "stop_reason": resp.stop_reason, "_raw": resp}
+                "stop_reason": resp.stop_reason, "_raw": resp,
+                "_usage": _usage}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

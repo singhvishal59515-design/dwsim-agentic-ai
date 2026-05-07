@@ -376,6 +376,7 @@ def _get_agent() -> DWSIMAgentV2:
             bridge=_get_bridge(),
             verbose=False,
             stream_output=False,
+            max_iterations=40,   # complex builds (H2-REF, distillation) need 30+ steps
         )
     return _agent
 
@@ -814,7 +815,7 @@ async def chat_stream(
                     "type": "reflect", "data": reflect_result
                 }))
 
-            await queue.put(json.dumps({"type": "done", "data": answer}))
+            await queue.put(json.dumps({"type": "done", "data": answer, "session_id": tracker.session.session_id if tracker else ""}))
         except Exception as exc:
             session = tracker.finish("", error=str(exc))  # ← log failure
             answer  = ""
@@ -2188,6 +2189,20 @@ def eval_session_detail(session_id: str):
         if s.get("session_id") == session_id:
             return {"success": True, "session": s}
     raise HTTPException(404, f"Session {session_id!r} not found")
+
+
+@app.post("/eval/feedback/{session_id}")
+def eval_feedback(session_id: str, body: dict):
+    """Store human feedback (thumbs_up / thumbs_down) for a session."""
+    feedback = (body or {}).get("feedback", "")
+    note     = (body or {}).get("note", "")
+    if feedback not in ("thumbs_up", "thumbs_down"):
+        raise HTTPException(400, "feedback must be 'thumbs_up' or 'thumbs_down'")
+    log = get_eval_log()
+    found = log.record_feedback(session_id, feedback, note)
+    if not found:
+        raise HTTPException(404, f"Session {session_id!r} not found")
+    return {"success": True, "session_id": session_id, "feedback": feedback}
 
 
 # ── Ablation study endpoints ──────────────────────────────────────────────────
