@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>DWSIM Agentic AI — Workflow Architecture</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: #0a0e1a;
+    font-family: 'Segoe UI', 'Inter', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 20px;
+  }
+
+  h1 {
+    color: #e2e8f0;
+    font-size: 1.45rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    color: #64748b;
+    font-size: 0.78rem;
+    margin-bottom: 36px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* ─── SVG wrapper ─────────────────────────────────────── */
+  .diagram-wrap {
+    width: 100%;
+    max-width: 1300px;
+    background: #0d1120;
+    border: 1px solid #1e2a45;
+    border-radius: 16px;
+    padding: 32px 24px;
+    overflow: hidden;
+  }
+
+  svg text { font-family: 'Segoe UI', 'Inter', sans-serif; }
+
+  /* ─── Glow keyframes ──────────────────────────────────── */
+  @keyframes pulse-cyan   { 0%,100%{filter:drop-shadow(0 0 6px #06b6d4)} 50%{filter:drop-shadow(0 0 16px #06b6d4)} }
+  @keyframes pulse-purple { 0%,100%{filter:drop-shadow(0 0 6px #a855f7)} 50%{filter:drop-shadow(0 0 16px #a855f7)} }
+  @keyframes pulse-green  { 0%,100%{filter:drop-shadow(0 0 6px #22c55e)} 50%{filter:drop-shadow(0 0 16px #22c55e)} }
+  @keyframes pulse-amber  { 0%,100%{filter:drop-shadow(0 0 6px #f59e0b)} 50%{filter:drop-shadow(0 0 16px #f59e0b)} }
+  @keyframes pulse-rose   { 0%,100%{filter:drop-shadow(0 0 6px #f43f5e)} 50%{filter:drop-shadow(0 0 16px #f43f5e)} }
+  @keyframes dash-flow { to { stroke-dashoffset: -20; } }
+
+  .glow-cyan   { animation: pulse-cyan   3s ease-in-out infinite; }
+  .glow-purple { animation: pulse-purple 3s ease-in-out infinite; }
+  .glow-green  { animation: pulse-green  3s ease-in-out infinite; }
+  .glow-amber  { animation: pulse-amber  3s ease-in-out infinite; }
+  .glow-rose   { animation: pulse-rose   3s ease-in-out infinite; }
+
+  .flow-arrow { animation: dash-flow 1.2s linear infinite; stroke-dasharray: 8 4; }
+
+  /* legend */
+  .legend { display:flex; gap:24px; margin-top:20px; flex-wrap:wrap; justify-content:center; }
+  .legend-item { display:flex; align-items:center; gap:7px; font-size:0.72rem; color:#94a3b8; }
+  .legend-dot { width:12px; height:12px; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<h1>DWSIM Agentic AI — System Workflow</h1>
+<p class="subtitle">ReAct · BM25 RAG · Safety Validator SF-01→SF-13 · Multi-Provider LLM · Dynamic Tool Selection</p>
+
+<div class="diagram-wrap">
+<svg viewBox="0 0 1240 760" width="100%" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- ═══════════════════════════════════════════════════
+       DEFS — gradients, markers, glow filters
+  ════════════════════════════════════════════════════ -->
+  <defs>
+    <!-- Arrow markers -->
+    <marker id="arr-cyan"   markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#06b6d4"/>
+    </marker>
+    <marker id="arr-purple" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#a855f7"/>
+    </marker>
+    <marker id="arr-green"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#22c55e"/>
+    </marker>
+    <marker id="arr-amber"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arr-rose"   markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#f43f5e"/>
+    </marker>
+    <marker id="arr-white"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 Z" fill="#94a3b8"/>
+    </marker>
+
+    <!-- Glow filters -->
+    <filter id="glow-c" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-p" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Gradients for box fills -->
+    <linearGradient id="g-agent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1a1f38"/>
+      <stop offset="100%" stop-color="#0f1226"/>
+    </linearGradient>
+    <linearGradient id="g-user" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1a2535"/>
+      <stop offset="100%" stop-color="#0f1a26"/>
+    </linearGradient>
+    <linearGradient id="g-llm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1d1329"/>
+      <stop offset="100%" stop-color="#110b1f"/>
+    </linearGradient>
+    <linearGradient id="g-dwsim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#0d1f1a"/>
+      <stop offset="100%" stop-color="#081410"/>
+    </linearGradient>
+    <linearGradient id="g-kb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1c1500"/>
+      <stop offset="100%" stop-color="#130e00"/>
+    </linearGradient>
+    <linearGradient id="g-eval" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1c0a10"/>
+      <stop offset="100%" stop-color="#120510"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ═══════════════════════════════════════════════════
+       1. USER  (far left)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-cyan" filter="url(#glow-c)">
+    <rect x="12" y="270" width="110" height="130" rx="12"
+          fill="url(#g-user)" stroke="#06b6d4" stroke-width="1.5"/>
+    <!-- icon: person -->
+    <circle cx="67" cy="302" r="14" fill="none" stroke="#06b6d4" stroke-width="1.5"/>
+    <path d="M40,340 Q67,320 94,340" fill="none" stroke="#06b6d4" stroke-width="1.5"/>
+    <text x="67" y="365" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">User</text>
+    <text x="67" y="381" text-anchor="middle" fill="#94a3b8" font-size="10">React / CLI</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       2. FASTAPI  (second column)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-cyan" filter="url(#glow-c)">
+    <rect x="155" y="245" width="130" height="180" rx="12"
+          fill="url(#g-user)" stroke="#06b6d4" stroke-width="1.5"/>
+    <text x="220" y="272" text-anchor="middle" fill="#06b6d4" font-size="10" font-weight="700" letter-spacing="1">FASTAPI</text>
+    <text x="220" y="289" text-anchor="middle" fill="#94a3b8" font-size="9">Backend</text>
+    <!-- SSE badge -->
+    <rect x="178" y="298" width="84" height="22" rx="5" fill="#0a1828" stroke="#06b6d4" stroke-width="1"/>
+    <text x="220" y="313" text-anchor="middle" fill="#06b6d4" font-size="10">SSE Streaming</text>
+    <!-- injection defense badge -->
+    <rect x="168" y="328" width="104" height="22" rx="5" fill="#0a1828" stroke="#1e2a45" stroke-width="1"/>
+    <text x="220" y="343" text-anchor="middle" fill="#64748b" font-size="9.5">Injection Defense</text>
+    <!-- replay log badge -->
+    <rect x="178" y="358" width="84" height="22" rx="5" fill="#0a1828" stroke="#1e2a45" stroke-width="1"/>
+    <text x="220" y="373" text-anchor="middle" fill="#64748b" font-size="9.5">Replay Log</text>
+    <!-- 103+ endpoints -->
+    <text x="220" y="410" text-anchor="middle" fill="#475569" font-size="9">103+ REST endpoints</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       3. AGENT V2 — large central box
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-purple" filter="url(#glow-p)">
+    <rect x="320" y="60" width="480" height="640" rx="16"
+          fill="url(#g-agent)" stroke="#a855f7" stroke-width="2"/>
+    <text x="560" y="90" text-anchor="middle" fill="#a855f7" font-size="12" font-weight="700" letter-spacing="1.5">⚙  AGENT V2  —  ReAct Loop</text>
+    <text x="560" y="107" text-anchor="middle" fill="#64748b" font-size="9">agent_v2.py  ·  max_iterations=20  ·  seed=42  ·  temp=0</text>
+  </g>
+
+  <!-- Sub-boxes inside Agent V2 -->
+
+  <!-- 3a. State Card Injection -->
+  <rect x="336" y="118" width="208" height="60" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="440" y="138" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">📋  State Card Injection</text>
+  <text x="440" y="153" text-anchor="middle" fill="#64748b" font-size="8.5">Flowsheet · PP · Compounds · Streams</text>
+  <text x="440" y="168" text-anchor="middle" fill="#64748b" font-size="8.5">injected as system msg every turn</text>
+
+  <!-- 3b. History Manager -->
+  <rect x="556" y="118" width="228" height="60" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="670" y="138" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🗂  History Manager</text>
+  <text x="670" y="153" text-anchor="middle" fill="#64748b" font-size="8.5">Hierarchical summarization · 80k char cap</text>
+  <text x="670" y="168" text-anchor="middle" fill="#64748b" font-size="8.5">summary → system role (not user)</text>
+
+  <!-- 3c. Dynamic Tool Selector -->
+  <rect x="336" y="192" width="208" height="60" rx="8" fill="#0e1325" stroke="#a855f7" stroke-width="1"/>
+  <text x="440" y="212" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🔧  Dynamic Tool Selector</text>
+  <text x="440" y="227" text-anchor="middle" fill="#64748b" font-size="8.5">phase-aware: discovery / build / analyze</text>
+  <text x="440" y="242" text-anchor="middle" fill="#64748b" font-size="8.5">60 tools → ~20 per turn</text>
+
+  <!-- 3d. Tool State Machine -->
+  <rect x="556" y="192" width="228" height="60" rx="8" fill="#0e1325" stroke="#a855f7" stroke-width="1"/>
+  <text x="670" y="212" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🔒  Tool State Machine</text>
+  <text x="670" y="227" text-anchor="middle" fill="#64748b" font-size="8.5">43 tools require flowsheet</text>
+  <text x="670" y="242" text-anchor="middle" fill="#64748b" font-size="8.5">8 tools require objects in flowsheet</text>
+
+  <!-- 3e. LLM Chat w/ Failover — prominent inner box -->
+  <rect x="336" y="268" width="448" height="90" rx="10" fill="#130d1f" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="560" y="291" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="700">🧠  LLM Chat  +  Provider Failover</text>
+  <text x="430" y="310" text-anchor="middle" fill="#94a3b8" font-size="9">OpenAI gpt-4o</text>
+  <text x="503" y="310" text-anchor="middle" fill="#64748b" font-size="9">→</text>
+  <text x="560" y="310" text-anchor="middle" fill="#94a3b8" font-size="9">Groq Llama-3.3</text>
+  <text x="630" y="310" text-anchor="middle" fill="#64748b" font-size="9">→</text>
+  <text x="695" y="310" text-anchor="middle" fill="#94a3b8" font-size="9">Anthropic</text>
+  <text x="750" y="310" text-anchor="middle" fill="#64748b" font-size="9">→</text>
+  <text x="780" y="310" text-anchor="middle" fill="#94a3b8" font-size="9">Gemini</text>
+  <text x="560" y="332" text-anchor="middle" fill="#64748b" font-size="8.5">retry temps (0 / 0.15 / 0.25) · shared 180s budget · exponential backoff</text>
+  <text x="560" y="347" text-anchor="middle" fill="#64748b" font-size="8.5">temperature=0 seed=42 (deterministic) · budget guards SDK hang</text>
+
+  <!-- 3f. Arg Coerce + Sanitize -->
+  <rect x="336" y="372" width="208" height="56" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="440" y="392" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🛡  Arg Coerce + Sanitize</text>
+  <text x="440" y="407" text-anchor="middle" fill="#64748b" font-size="8.5">_ARG_COERCE: str→float/int/bool</text>
+  <text x="440" y="420" text-anchor="middle" fill="#64748b" font-size="8.5">injection patterns → [BLOCKED]</text>
+
+  <!-- 3g. Tool Dispatch -->
+  <rect x="556" y="372" width="228" height="56" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="670" y="392" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">⚡  Tool Dispatch</text>
+  <text x="670" y="407" text-anchor="middle" fill="#64748b" font-size="8.5">_run_tool() · per-tool timeout</text>
+  <text x="670" y="420" text-anchor="middle" fill="#64748b" font-size="8.5">_compress_tool_result() &gt; 2k chars</text>
+
+  <!-- 3h. Auto-Diagnosis -->
+  <rect x="336" y="442" width="208" height="56" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="440" y="462" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🩺  Convergence Diagnosis</text>
+  <text x="440" y="477" text-anchor="middle" fill="#64748b" font-size="8.5">auto check_convergence</text>
+  <text x="440" y="490" text-anchor="middle" fill="#64748b" font-size="8.5">+ validate_feed_specs on failure</text>
+
+  <!-- 3i. Quality Guard -->
+  <rect x="556" y="442" width="228" height="56" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="670" y="462" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">✅  Quality Guard</text>
+  <text x="670" y="477" text-anchor="middle" fill="#64748b" font-size="8.5">heuristic: numbers without tool → flag</text>
+  <text x="670" y="490" text-anchor="middle" fill="#64748b" font-size="8.5">SF violations not mentioned → flag</text>
+
+  <!-- 3j. Output Filter -->
+  <rect x="336" y="512" width="208" height="50" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="440" y="532" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">🔍  Output Filter</text>
+  <text x="440" y="547" text-anchor="middle" fill="#64748b" font-size="8.5">unverified safety claims → disclaimer</text>
+  <text x="440" y="558" text-anchor="middle" fill="#64748b" font-size="8.5">replay log export · SSE stream</text>
+
+  <!-- 3k. Reaction Validator -->
+  <rect x="556" y="512" width="228" height="50" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="670" y="532" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">⚗  Reaction Validator</text>
+  <text x="670" y="547" text-anchor="middle" fill="#64748b" font-size="8.5">Ea range 0-400 kJ/mol · k0&gt;0</text>
+  <text x="670" y="558" text-anchor="middle" fill="#64748b" font-size="8.5">stoichiometry sign convention</text>
+
+  <!-- 3l. Prompt Catalog -->
+  <rect x="336" y="576" width="448" height="46" rx="8" fill="#0e1325" stroke="#475569" stroke-width="1"/>
+  <text x="560" y="598" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">📚  Versioned Prompt Catalog  ·  PromptRegistry</text>
+  <text x="560" y="613" text-anchor="middle" fill="#64748b" font-size="8.5">6 versions (v1.0–v1.3) · rollback · A/B testing · system prompt metadata</text>
+
+  <!-- 3m. AIJudge (async) inside agent -->
+  <rect x="336" y="634" width="448" height="46" rx="8" fill="#130d1f" stroke="#7c3aed" stroke-width="1"/>
+  <text x="560" y="654" text-anchor="middle" fill="#c4b5fd" font-size="10" font-weight="600">🧑‍⚖️  AIJudge (async daemon thread)</text>
+  <text x="560" y="670" text-anchor="middle" fill="#64748b" font-size="8.5">4 criteria: EOS · plausibility · completeness · hallucination → 1-5 scores → eval_log</text>
+
+  <!-- ═══════════════════════════════════════════════════
+       4. LLM PROVIDERS (top right)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-purple" filter="url(#glow-p)">
+    <rect x="828" y="62" width="200" height="170" rx="12"
+          fill="url(#g-llm)" stroke="#a855f7" stroke-width="1.5"/>
+    <text x="928" y="85" text-anchor="middle" fill="#a855f7" font-size="10" font-weight="700" letter-spacing="1">LLM PROVIDERS</text>
+
+    <rect x="844" y="96" width="168" height="24" rx="5" fill="#1a0f2e" stroke="#7c3aed" stroke-width="1"/>
+    <text x="928" y="112" text-anchor="middle" fill="#e2e8f0" font-size="10">OpenAI  gpt-4o</text>
+
+    <rect x="844" y="126" width="168" height="24" rx="5" fill="#1a0f2e" stroke="#475569" stroke-width="1"/>
+    <text x="928" y="142" text-anchor="middle" fill="#94a3b8" font-size="10">Groq  Llama-3.3-70B</text>
+
+    <rect x="844" y="156" width="168" height="24" rx="5" fill="#1a0f2e" stroke="#475569" stroke-width="1"/>
+    <text x="928" y="172" text-anchor="middle" fill="#94a3b8" font-size="10">Anthropic  Claude</text>
+
+    <rect x="844" y="186" width="168" height="24" rx="5" fill="#1a0f2e" stroke="#475569" stroke-width="1"/>
+    <text x="928" y="202" text-anchor="middle" fill="#94a3b8" font-size="10">Gemini  2.0-flash</text>
+
+    <text x="928" y="224" text-anchor="middle" fill="#475569" font-size="8.5">failover if primary fails</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       5. DWSIM ENGINE (middle right)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-green" filter="url(#glow-c)">
+    <rect x="828" y="258" width="200" height="240" rx="12"
+          fill="url(#g-dwsim)" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="928" y="281" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="700" letter-spacing="1">DWSIM v9</text>
+    <text x="928" y="295" text-anchor="middle" fill="#64748b" font-size="8.5">Windows · pythonnet · COM STA</text>
+
+    <!-- Bridge box -->
+    <rect x="844" y="304" width="168" height="36" rx="6" fill="#0a1f12" stroke="#22c55e" stroke-width="1"/>
+    <text x="928" y="319" text-anchor="middle" fill="#86efac" font-size="10" font-weight="600">DWSIMBridgeV2</text>
+    <text x="928" y="332" text-anchor="middle" fill="#64748b" font-size="8.5">single-threaded .NET bridge</text>
+
+    <!-- Safety box -->
+    <rect x="844" y="348" width="168" height="42" rx="6" fill="#0a1f12" stroke="#4ade80" stroke-width="1"/>
+    <text x="928" y="365" text-anchor="middle" fill="#86efac" font-size="10" font-weight="600">Safety Validator</text>
+    <text x="928" y="378" text-anchor="middle" fill="#64748b" font-size="8.5">SF-01 → SF-13</text>
+    <text x="928" y="390" text-anchor="middle" fill="#64748b" font-size="8.5">pre-solve block + post-solve detect</text>
+
+    <!-- Unit ops list -->
+    <text x="928" y="412" text-anchor="middle" fill="#4ade80" font-size="9" font-weight="600">62 DWSIM Tools</text>
+    <text x="928" y="426" text-anchor="middle" fill="#64748b" font-size="8">Heater · Cooler · HX · Pump · Compressor</text>
+    <text x="928" y="439" text-anchor="middle" fill="#64748b" font-size="8">Distillation · Reactor · Absorber · Pipe</text>
+    <text x="928" y="452" text-anchor="middle" fill="#64748b" font-size="8">Monte Carlo · Bayesian Opt · Parametric</text>
+    <text x="928" y="466" text-anchor="middle" fill="#64748b" font-size="8">Pinch Analysis · Phase Envelope · Report</text>
+    <text x="928" y="487" text-anchor="middle" fill="#475569" font-size="8.5">.dwxmz flowsheet files</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       6. KNOWLEDGE LAYER (bottom right)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-amber" filter="url(#glow-c)">
+    <rect x="828" y="520" width="200" height="210" rx="12"
+          fill="url(#g-kb)" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="928" y="543" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="700" letter-spacing="1">KNOWLEDGE LAYER</text>
+
+    <!-- BM25 RAG -->
+    <rect x="844" y="552" width="168" height="42" rx="6" fill="#1c1200" stroke="#f59e0b" stroke-width="1"/>
+    <text x="928" y="568" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600">BM25 RAG  (165 chunks)</text>
+    <text x="928" y="581" text-anchor="middle" fill="#64748b" font-size="8.5">LRU-256 + Jaccard semantic cache ≥0.80</text>
+    <text x="928" y="593" text-anchor="middle" fill="#64748b" font-size="8.5">MIN_SCORE=0.5 · retrieve 2×top_k</text>
+
+    <!-- Property DB -->
+    <rect x="844" y="602" width="168" height="42" rx="6" fill="#1c1200" stroke="#d97706" stroke-width="1"/>
+    <text x="928" y="618" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600">Property DB  (SQLite)</text>
+    <text x="928" y="631" text-anchor="middle" fill="#64748b" font-size="8.5">84 compounds · Tc Pc ω Antoine BIPs</text>
+    <text x="928" y="643" text-anchor="middle" fill="#64748b" font-size="8.5">NRTL · UNIQUAC · T-dep NRTL · Henry</text>
+
+    <!-- KB topics -->
+    <text x="928" y="664" text-anchor="middle" fill="#b45309" font-size="9" font-weight="600">Topics covered</text>
+    <text x="928" y="677" text-anchor="middle" fill="#64748b" font-size="7.5">EOS · NRTL/UNIQUAC · Distill Algorithms</text>
+    <text x="928" y="689" text-anchor="middle" fill="#64748b" font-size="7.5">Pipe Hydraulics · Electrolyte/MEA · HEN</text>
+    <text x="928" y="701" text-anchor="middle" fill="#64748b" font-size="7.5">Reactions · LLE · Equipment Sizing · FUG</text>
+    <text x="928" y="714" text-anchor="middle" fill="#64748b" font-size="7.5">batch_lookup_properties (N compounds 1 call)</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       7. EVALUATION & FINETUNING (bottom, below user)
+  ════════════════════════════════════════════════════ -->
+  <g class="glow-rose" filter="url(#glow-c)">
+    <rect x="12" y="435" width="290" height="295" rx="12"
+          fill="url(#g-eval)" stroke="#f43f5e" stroke-width="1.5"/>
+    <text x="157" y="458" text-anchor="middle" fill="#f43f5e" font-size="10" font-weight="700" letter-spacing="1">EVALUATION &amp; FINETUNING</text>
+
+    <rect x="28" y="468" width="258" height="50" rx="7" fill="#1c0510" stroke="#f43f5e" stroke-width="1"/>
+    <text x="157" y="487" text-anchor="middle" fill="#fda4af" font-size="10" font-weight="600">AI Judge (4 criteria)</text>
+    <text x="157" y="501" text-anchor="middle" fill="#64748b" font-size="8.5">EOS correctness · physical plausibility</text>
+    <text x="157" y="513" text-anchor="middle" fill="#64748b" font-size="8.5">completeness · hallucination absence</text>
+
+    <rect x="28" y="526" width="258" height="40" rx="7" fill="#1c0510" stroke="#be185d" stroke-width="1"/>
+    <text x="157" y="543" text-anchor="middle" fill="#fda4af" font-size="10" font-weight="600">Evaluation Log</text>
+    <text x="157" y="558" text-anchor="middle" fill="#64748b" font-size="8.5">eval_log.json · 6 extended metrics</text>
+
+    <rect x="28" y="574" width="258" height="40" rx="7" fill="#1c0510" stroke="#be185d" stroke-width="1"/>
+    <text x="157" y="591" text-anchor="middle" fill="#fda4af" font-size="10" font-weight="600">Finetuning Pipeline</text>
+    <text x="157" y="606" text-anchor="middle" fill="#64748b" font-size="8.5">7 quality filters · JSONL export · cost estimate</text>
+
+    <rect x="28" y="622" width="258" height="40" rx="7" fill="#1c0510" stroke="#be185d" stroke-width="1"/>
+    <text x="157" y="639" text-anchor="middle" fill="#fda4af" font-size: 10" font-weight="600">Ablation Study</text>
+    <text x="157" y="654" text-anchor="middle" fill="#64748b" font-size="8.5">BM25 vs TF-IDF · state-card ablation</text>
+    <text x="157" y="666" text-anchor="middle" fill="#64748b" font-size="8.5">failover effectiveness</text>
+
+    <rect x="28" y="670" width="258" height="40" rx="7" fill="#1c0510" stroke="#be185d" stroke-width="1"/>
+    <text x="157" y="687" text-anchor="middle" fill="#fda4af" font-size="10" font-weight="600">Benchmark Suite</text>
+    <text x="157" y="702" text-anchor="middle" fill="#64748b" font-size="8.5">reference flowsheets · accuracy vs DWSIM GUI</text>
+    <text x="157" y="714" text-anchor="middle" fill="#64748b" font-size="8.5">task duration · convergence rate</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════
+       ARROWS
+  ════════════════════════════════════════════════════ -->
+
+  <!-- User → FastAPI (request) -->
+  <line x1="122" y1="330" x2="153" y2="330"
+        stroke="#06b6d4" stroke-width="1.5" marker-end="url(#arr-cyan)"
+        stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="137" y="322" text-anchor="middle" fill="#06b6d4" font-size="8">request</text>
+
+  <!-- FastAPI → User (deliver) -->
+  <line x1="155" y1="350" x2="123" y2="350"
+        stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-white)"/>
+  <text x="138" y="365" text-anchor="middle" fill="#64748b" font-size="8">SSE stream</text>
+
+  <!-- FastAPI → Agent V2 -->
+  <line x1="285" y1="310" x2="318" y2="310"
+        stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr-purple)"
+        stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="300" y="302" text-anchor="middle" fill="#a855f7" font-size="8">chat()</text>
+
+  <!-- Agent V2 → FastAPI (response) -->
+  <line x1="320" y1="335" x2="287" y2="335"
+        stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-white)"/>
+  <text x="303" y="349" text-anchor="middle" fill="#64748b" font-size="8">answer</text>
+
+  <!-- Agent V2 → LLM Providers -->
+  <line x1="800" y1="170" x2="826" y2="170"
+        stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr-purple)"
+        stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="812" y="163" text-anchor="middle" fill="#a855f7" font-size="8">messages</text>
+
+  <!-- LLM → Agent V2 (tool calls / text) -->
+  <line x1="828" y1="190" x2="801" y2="190"
+        stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-white)"/>
+  <text x="813" y="204" text-anchor="middle" fill="#64748b" font-size="8">tool_calls</text>
+
+  <!-- Agent V2 → DWSIM Bridge -->
+  <line x1="800" y1="330" x2="826" y2="330"
+        stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-green)"
+        stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="812" y="322" text-anchor="middle" fill="#22c55e" font-size="8">tool call</text>
+
+  <!-- DWSIM → Agent (result) -->
+  <line x1="828" y1="350" x2="801" y2="350"
+        stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-white)"/>
+  <text x="813" y="364" text-anchor="middle" fill="#64748b" font-size="8">result</text>
+
+  <!-- Agent V2 → Knowledge Layer -->
+  <line x1="800" y1="500" x2="826" y2="580"
+        stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-amber)"
+        stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="822" y="536" text-anchor="middle" fill="#f59e0b" font-size="8" transform="rotate(-18,822,536)">search_knowledge</text>
+
+  <!-- Knowledge → Agent -->
+  <line x1="828" y1="610" x2="802" y2="520"
+        stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-white)"/>
+  <text x="822" y="573" text-anchor="middle" fill="#64748b" font-size="8" transform="rotate(-18,822,573)">chunks</text>
+
+  <!-- Agent → Evaluation (arrow going down-left) -->
+  <path d="M400,700 Q350,740 310,660"
+        fill="none" stroke="#f43f5e" stroke-width="1.5"
+        marker-end="url(#arr-rose)" stroke-dasharray="6 3" class="flow-arrow"/>
+  <text x="345" y="736" text-anchor="middle" fill="#f43f5e" font-size="8">judge / log</text>
+
+  <!-- ═══════════════════════════════════════════════════
+       Bottom label bar
+  ════════════════════════════════════════════════════ -->
+  <rect x="12" y="738" width="1216" height="14" rx="4" fill="#0a0e1a"/>
+  <text x="620" y="749" text-anchor="middle" fill="#1e2a45" font-size="9">
+    DWSIM Agentic AI  ·  FastAPI + React  ·  Multi-Provider LLM  ·  BM25 RAG  ·  SQLite Property DB  ·  SF-01→SF-13 Safety Validator
+  </text>
+
+</svg>
+</div>
+
+<div class="legend">
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#06b6d4;box-shadow:0 0 6px #06b6d4"></div>User / Frontend / FastAPI
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#a855f7;box-shadow:0 0 6px #a855f7"></div>Agent V2 ReAct Core
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e"></div>DWSIM + Safety Validator
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#f59e0b;box-shadow:0 0 6px #f59e0b"></div>Knowledge Layer (RAG + DB)
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#f43f5e;box-shadow:0 0 6px #f43f5e"></div>Evaluation &amp; Finetuning
+  </div>
+  <div class="legend-item" style="color:#475569">
+    ─ ─ animated arrow = data flow
+  </div>
+</div>
+
+</body>
+</html>
