@@ -68,8 +68,24 @@ desktop.ini
 # Windows kill scripts
 backend/_kill*.ps1
 
-# Temporary audit/check scripts
+# Temporary audit/check scripts + scratch text
 backend/_*.py
+backend/_*.txt
+_*.txt
+
+# Generated result logs / benchmark output (not source)
+backend/hydrogen_results.jsonl
+backend/*_results.jsonl
+backend/benchmark_results/
+backend/*_results.json
+backend/*_report.json
+backend/experience_cases.json
+backend/_fossee_e2e_results.json
+
+# Stray/backup files (typo'd pip redirects, failed saves)
+backend/=*
+backend/*.py_failed
+backend/*.bak
 
 # Replay log (session data — may contain user queries)
 backend/replay_turns/

@@ -16,6 +16,18 @@ groq>=0.9.0                # FREE — https://console.groq.com
 # ── Scientific computing (ACC-5 optimisation) ──────────────────────────────
 scipy>=1.12.0
 numpy>=1.26.0
+# External optimisation stack (pushing toward Aspen-Plus-level capacity). Each
+# degrades gracefully — the relevant tool falls back to SciPy/DE when absent.
+cma>=3.3.0          # CMA-ES: preferred global search (sample-efficient)
+pymoo>=0.6.1        # NSGA-II: true multi-objective Pareto fronts (non-convex)
+nlopt>=2.7.0        # constrained NLP with NATIVE constraints (ISRES/COBYLA/MMA)
+SALib>=1.5.0        # global sensitivity (Sobol/Morris, incl. interactions)
+pyomo>=6.6.0        # algebraic modelling layer for equation-oriented (EO) NLP
+networkx>=3.0       # flowsheet graph analysis: recycle/cycle detection + tearing
+idaes-pse>=2.10.0  # provides the IPOPT interior-point binary for the EO engine
+# IPOPT binary is fetched once (not via pip) with:  idaes get-extensions
+# eo_optimizer auto-detects it (imports idaes to register Pyomo's solver path);
+# if absent it solves the identical surrogate model with SciPy SLSQP instead.
 
 # ── Data analysis & reporting (v4) ─────────────────────────────────────────
 pandas>=2.0.0           # DataFrame aggregation

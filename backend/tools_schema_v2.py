@@ -33,10 +33,34 @@ DWSIM_TOOLS = [
         "name": "find_flowsheets",
         "description": (
             "Search the local computer for DWSIM flowsheet files (.dwxmz, .dwxm). "
-            "Call this FIRST when no flowsheet is loaded. "
-            "Returns a list of real file paths — use one with load_flowsheet."
+            "Scans Documents, Desktop, Downloads, AppData\\Local\\DWSIM, and "
+            "Program Files\\DWSIM with a 20-second time budget and noise-dir "
+            "pruning (node_modules, .git, OneDrive, etc. skipped). Returns up "
+            "to 30 most-recent matches plus a top_directories summary and "
+            "total count. If results are too slow or wide, pass name_filter "
+            "to narrow. DO NOT refuse with 'timed out' or 'technical "
+            "limitation' — always report the count and paths returned."
         ),
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_filter": {
+                    "type": "string",
+                    "description": "Optional case-insensitive substring filter on filename, e.g. 'methanol', 'reactor'."
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max paths to return (default 30, max 100).",
+                    "default": 30,
+                },
+                "deep_scan": {
+                    "type": "boolean",
+                    "description": "If true, also walks the full home directory (slower). Default false.",
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
     },
     {
         "name": "load_flowsheet",
@@ -456,68 +480,6 @@ DWSIM_TOOLS = [
         },
     },
 
-    # ── Bayesian Optimisation ─────────────────────────────────────────────────
-    {
-        "name": "bayesian_optimize",
-        "description": (
-            "Bayesian Optimisation — finds optimal DWSIM operating conditions using a "
-            "Gaussian Process surrogate model with Expected Improvement acquisition. "
-            "BEST CHOICE when: (1) simulations are expensive (>10s each), "
-            "(2) you have 1–5 decision variables, "
-            "(3) you need results quickly (10–25 evaluations vs 100+ for differential evolution). "
-            "Examples: find reflux ratio + feed temperature that minimise reboiler duty; "
-            "find compressor pressure + efficiency that maximise product flow. "
-            "Use optimize_parameter for 1D problems; optimize_multivar for >5 variables."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "variables": {
-                    "type": "array",
-                    "description": (
-                        "List of decision variables. Each element is an object with: "
-                        "tag (stream or unit-op tag), property (e.g. 'temperature', 'mass_flow'), "
-                        "unit (e.g. 'C', 'kg/h'), lower_bound (float), upper_bound (float)."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "required": ["tag", "property", "lower_bound", "upper_bound"],
-                        "properties": {
-                            "tag":         {"type": "string", "description": "Stream or unit-op tag."},
-                            "property":    {"type": "string", "description": "Property to vary."},
-                            "unit":        {"type": "string", "description": "Unit string."},
-                            "lower_bound": {"type": "number", "description": "Lower bound of search range."},
-                            "upper_bound": {"type": "number", "description": "Upper bound of search range."},
-                        },
-                    },
-                },
-                "observe_tag":      {"type": "string", "description": "Tag of the stream to observe."},
-                "observe_property": {"type": "string", "description": "Property to optimise, e.g. 'temperature_C'."},
-                "minimize": {
-                    "type": "boolean",
-                    "description": "True to minimise (default), False to maximise.",
-                    "default": True,
-                },
-                "n_initial": {
-                    "type": "integer",
-                    "description": "Latin-Hypercube exploration evaluations before BO starts (default 5).",
-                    "default": 5,
-                },
-                "max_iter": {
-                    "type": "integer",
-                    "description": "Bayesian optimisation iterations after initial phase (default 20). Total = n_initial + max_iter.",
-                    "default": 20,
-                },
-                "tolerance": {
-                    "type": "number",
-                    "description": "Early-stop tolerance — stops if improvement < tolerance for 5 consecutive iters (default 1e-4).",
-                    "default": 1e-4,
-                },
-            },
-            "required": ["variables", "observe_tag", "observe_property"],
-        },
-    },
-
     # ── v4: Autonomous Flowsheet Generation ──────────────────────────────────
 
 
@@ -550,128 +512,11 @@ DWSIM_TOOLS = [
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 
-    # create_flowsheet removed — AI now builds flowsheets step-by-step using
-    # new_flowsheet → add_object → connect_streams → set_stream_property /
-    # set_unit_op_property → save_and_solve → get_simulation_results
-    {
-        "name": "create_flowsheet",
-        "description": (
-            "[DISABLED — do NOT call this tool. "
-            "Use new_flowsheet + add_object + connect_streams + "
-            "set_stream_property + set_unit_op_property + save_and_solve instead.]"
-        ),
-        "parameters": {
-            "type": "object",
-            "required": ["topology"],
-            "properties": {
-                "topology": {
-                    "type": "object",
-                    "description": "Flowsheet topology specification",
-                    "required": ["compounds", "property_package", "streams", "connections"],
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Flowsheet name used as filename, e.g. 'methanol_water_sep'",
-                        },
-                        "save_path": {
-                            "type": "string",
-                            "description": "Absolute save path, e.g. C:/Users/hp/Documents/sim.dwxmz",
-                        },
-                        "property_package": {
-                            "type": "string",
-                            "description": (
-                                "Thermodynamic model key. Examples: "
-                                "'Peng-Robinson (PR)', 'Soave-Redlich-Kwong (SRK)', "
-                                "'NRTL', 'UNIFAC', \"Raoult's Law\", "
-                                "'Steam Tables (IAPWS-IF97)', 'CoolProp', 'Wilson'"
-                            ),
-                        },
-                        "compounds": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Compound names from DWSIM DB, e.g. ['Water', 'Methanol']",
-                        },
-                        "streams": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["tag"],
-                                "properties": {
-                                    "tag":          {"type": "string"},
-                                    "type":         {"type": "string",
-                                                     "description": "MaterialStream (default) or EnergyStream"},
-                                    "T":            {"type": "number"},
-                                    "T_unit":       {"type": "string", "description": "K or C"},
-                                    "P":            {"type": "number"},
-                                    "P_unit":       {"type": "string", "description": "Pa, bar, kPa, atm"},
-                                    "molar_flow":   {"type": "number"},
-                                    "flow_unit":    {"type": "string", "description": "mol/s, mol/h, kmol/h"},
-                                    "mass_flow":    {"type": "number", "description": "kg/s"},
-                                    "vapor_fraction": {"type": "number"},
-                                    "compositions": {
-                                        "type": "object",
-                                        "description": "Mole fractions summing to 1.0",
-                                        "additionalProperties": {"type": "number"},
-                                    },
-                                },
-                            },
-                        },
-                        "unit_ops": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["tag", "type"],
-                                "properties": {
-                                    "tag":              {"type": "string"},
-                                    "type":             {
-                                        "type": "string",
-                                        "description": (
-                                            "Exact type names: Heater, Cooler, HeatExchanger, "
-                                            "Pump, Compressor, Expander, Valve, "
-                                            "Mixer (stream combiner), Splitter (stream divider), "
-                                            "Separator (flash drum / two-phase vessel — also accepts "
-                                            "'flash', 'flash drum', 'flash tank'), "
-                                            "DistillationColumn, AbsorptionColumn, ShortcutColumn, "
-                                            "CSTR, PFR, GibbsReactor, ConversionReactor, "
-                                            "EquilibriumReactor, Pipe, CompoundSeparator"
-                                        ),
-                                    },
-                                    "outlet_T":         {"type": "number", "description": "Outlet T in K (Heater/Cooler only)"},
-                                    "pressure_drop":    {"type": "number", "description": "dP in Pa"},
-                                    "duty":             {"type": "number", "description": "Heat duty in W"},
-                                    "efficiency":       {"type": "number", "description": "0-1"},
-                                    "reflux_ratio":     {"type": "number"},
-                                    "stages":           {"type": "integer"},
-                                    "number_of_stages": {"type": "integer"},
-                                    "volume":           {"type": "number", "description": "m3"},
-                                    "conversion":       {"type": "number", "description": "0-1"},
-                                },
-                            },
-                        },
-                        "connections": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["from", "to"],
-                                "properties": {
-                                    "from":      {"type": "string"},
-                                    "to":        {"type": "string"},
-                                    "from_port": {"type": "integer",
-                                                  "description": "Output port index (0=first outlet)"},
-                                    "to_port":   {"type": "integer",
-                                                  "description": "Input port index (0=first inlet)"},
-                                },
-                            },
-                        },
-                        "run_simulation": {
-                            "type": "boolean",
-                            "description": "Whether to solve after building (default true)",
-                        },
-                    },
-                },
-            },
-        },
-    },
+    # create_flowsheet was removed from the schema (was [DISABLED] but still
+    # selectable). The AI now builds flowsheets step-by-step using:
+    #   new_flowsheet → add_object → connect_streams →
+    #   set_stream_property / set_unit_op_property → save_and_solve →
+    #   get_simulation_results
 
     {
         "name": "list_flowsheet_templates",
@@ -766,6 +611,129 @@ DWSIM_TOOLS = [
             "and properties are set. Returns converged status and stream results."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+
+    # ── Atomic build (reduces ~30 tool calls to 1) ─────────────────────────────
+    {
+        "name": "build_flowsheet_atomic",
+        "description": (
+            "Build, connect, configure, and solve a complete DWSIM flowsheet in ONE call. "
+            "PREFER THIS over the step-by-step approach (new_flowsheet → add_object × N → "
+            "connect_streams × M → set_stream_property → save_and_solve) when you have "
+            "the full flowsheet specification ready. "
+            "Pre-validates the spec (duplicate tags, unknown endpoints, missing feeds) "
+            "before touching DWSIM, so errors are actionable. "
+            "Returns the same envelope as save_and_solve plus build_log and build_errors."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["name", "compounds", "property_package", "objects", "connections"],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Flowsheet name, used as the .dwxmz filename.",
+                },
+                "compounds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "DWSIM compound names, e.g. ['Methane','Water','Hydrogen'].",
+                },
+                "property_package": {
+                    "type": "string",
+                    "description": (
+                        "Thermodynamic model: 'Peng-Robinson (PR)', 'NRTL', 'SRK', "
+                        "'Steam Tables (IAPWS-IF97)', etc."
+                    ),
+                },
+                "objects": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["tag", "type"],
+                        "properties": {
+                            "tag":  {"type": "string", "description": "Unique display name."},
+                            "type": {"type": "string", "description": (
+                                "Object type: MaterialStream, EnergyStream, Heater, Cooler, "
+                                "Pump, Compressor, Expander, Valve, Mixer, Splitter, Separator, "
+                                "HeatExchanger, ConversionReactor, GibbsReactor, CSTR, PFR, "
+                                "DistillationColumn, ShortcutColumn."
+                            )},
+                        },
+                    },
+                    "description": "Every stream and unit operation in the flowsheet.",
+                },
+                "connections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["from_tag", "to_tag"],
+                        "properties": {
+                            "from_tag":  {"type": "string"},
+                            "to_tag":    {"type": "string"},
+                            "from_port": {"type": "integer", "description": "Default 0."},
+                            "to_port":   {"type": "integer", "description": "Default 0."},
+                        },
+                    },
+                    "description": (
+                        "Stream connections. Port rules: material inlet → to_port=0; "
+                        "material outlet → from_port=0; second outlet → from_port=1; "
+                        "energy stream → to_port=1."
+                    ),
+                },
+                "feed_specs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["tag"],
+                        "properties": {
+                            "tag":              {"type": "string"},
+                            "temperature":      {"type": "number"},
+                            "temperature_unit": {"type": "string",
+                                                 "description": "'K' (default), 'C', 'F'"},
+                            "pressure":         {"type": "number"},
+                            "pressure_unit":    {"type": "string",
+                                                 "description": "'Pa' (default), 'bar', 'kPa', 'atm'"},
+                            "massflow":         {"type": "number"},
+                            "massflow_unit":    {"type": "string",
+                                                 "description": "'kg/s' (default), 'kg/h', 't/h'"},
+                            "molarflow":        {"type": "number"},
+                            "molarflow_unit":   {"type": "string",
+                                                 "description": "'mol/s' (default), 'mol/h', 'kmol/h'"},
+                            "vapor_fraction":   {"type": "number",
+                                                 "description": "0=liquid, 1=vapor."},
+                            "composition": {
+                                "type": "object",
+                                "description": "Mole fractions keyed by compound name. Must sum to 1.0.",
+                            },
+                        },
+                    },
+                    "description": (
+                        "Feed stream specifications. Include T, P, flow, and composition "
+                        "for every inlet stream that enters the flowsheet boundary."
+                    ),
+                },
+                "unit_op_specs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["tag", "property_name", "value"],
+                        "properties": {
+                            "tag":           {"type": "string"},
+                            "property_name": {"type": "string",
+                                              "description": "e.g. 'OutletTemperature', 'DeltaP', 'Efficiency'"},
+                            "value":         {"type": "string"},
+                            "unit":          {"type": "string",
+                                              "description": "Optional unit for auto-conversion."},
+                        },
+                    },
+                    "description": "Unit operation parameter settings.",
+                },
+                "save_path": {
+                    "type": "string",
+                    "description": "Optional save path. Defaults to ~/Documents/<name>.dwxmz.",
+                },
+            },
+        },
     },
 
     {
@@ -1600,6 +1568,353 @@ DWSIM_TOOLS = [
         },
     },
 
+    # ── End-to-end natural-language optimization workflow (poster flow) ──
+    {
+        "name": "optimize_flowsheet_with_llm",
+        "description": (
+            "AUTONOMOUS process optimization from a natural-language goal. "
+            "USE THIS WHEN the user says things like 'optimize the process', "
+            "'maximize H2 purity while minimising energy', 'find the best "
+            "operating conditions' — without specifying exact variables. "
+            "The tool:\n"
+            "  1) Inspects the loaded flowsheet, auto-suggests decision "
+            "     variables (reactor temperatures, feed flows, reflux ratios).\n"
+            "  2) Asks the LLM to translate the goal into a structured "
+            "     objective expression (single or multi-term).\n"
+            "  3) Runs DWSIM's INTERNAL optimization engine (DotNumerics "
+            "     L-BFGS-B / Simplex / DE) — same solvers as DWSIM's GUI.\n"
+            "  4) Returns poster-style markdown with Old→New→Change for "
+            "     every variable, the objective achieved, and a summary.\n"
+            "PREFER this over dwsim_optimize when the user has NOT provided "
+            "explicit variable lists / bounds / objective formulas. "
+            "PREFER dwsim_optimize when the user gives precise variables."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["goal"],
+            "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "User's optimization goal in plain English, e.g. 'maximize (H2+CO) purity at PSA while minimising total energy consumption'.",
+                },
+                "max_iter": {
+                    "type": "integer",
+                    "description": "Maximum solver iterations (default 50).",
+                    "default": 50,
+                },
+                "tolerance": {
+                    "type": "number",
+                    "description": "Solver convergence tolerance (default 1e-3).",
+                    "default": 1e-3,
+                },
+            },
+        },
+    },
+
+    # ── Escape-hatch reflection tools ──────────────────────────────────────
+    {
+        "name": "reflect_get_set",
+        "description": (
+            "GET or SET any property on any DWSIM .NET object via reflection path-walking. "
+            "Gives UNRESTRICTED access to every stream, unit-op, and flowsheet property. "
+            "ALWAYS call inspect_object first to discover valid property names. "
+            "READ: reflect_get_set('FEED', 'Phases[0].Properties.temperature') "
+            "WRITE: reflect_get_set('COL-01', 'NumberOfStages', '25') "
+            "NESTED: reflect_get_set('FEED', 'Compounds[\"Methanol\"].MoleFraction')"
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["object_name", "property_path"],
+            "properties": {
+                "object_name":   {"type": "string",
+                                   "description": "Stream/unit-op tag, or 'flowsheet' for the root"},
+                "property_path": {"type": "string",
+                                   "description": "Dotted path, e.g. 'Phases[0].Properties.temperature' or 'NumberOfStages'"},
+                "value":         {"type": "string",
+                                   "description": "If provided, SET the property to this value. Omit to GET."},
+            },
+        },
+    },
+    {
+        "name": "exec_python",
+        "description": (
+            "Execute a Python snippet directly against the live DWSIM flowsheet. "
+            "Use for: custom diagnostics, reading multiple properties, computing metrics, "
+            "troubleshooting convergence issues, any operation not in predefined tools. "
+            "Context: flowsheet (IFlowsheet), get_obj(name), results{} (output dict), math. "
+            "Write output to results dict. Example: "
+            "results['purity'] = get_obj('DISTILLATE').Phases[0].Compounds['Methanol'].MoleFraction"
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["code"],
+            "properties": {
+                "code":       {"type": "string",
+                                "description": "Python code. Use results{} for output. Imports not allowed."},
+                "timeout_s":  {"type": "number", "default": 30},
+            },
+        },
+    },
+    {
+        "name": "inspect_object",
+        "description": (
+            "Discover ALL readable properties on any DWSIM object. "
+            "ALWAYS call this before reflect_get_set or exec_python when you "
+            "don't know what properties exist. Equivalent to DWSIM's object browser. "
+            "Use filter_prefix to narrow (e.g. 'Number' shows NumberOfStages etc.)."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["object_name"],
+            "properties": {
+                "object_name":   {"type": "string"},
+                "filter_prefix": {"type": "string", "description": "Only show props starting with this"},
+                "filter_type":   {"type": "string", "description": "Only show props of this type"},
+                "max_props":     {"type": "integer", "default": 60},
+            },
+        },
+    },
+    {
+        "name": "iterative_spec_loop",
+        "description": (
+            "Automatically adjust a decision variable (via bisection) until an "
+            "observable property meets a target specification. "
+            "Use for: 'achieve 99% purity', 'hit 95% conversion', "
+            "'meet product flow target'. The bisection runs DWSIM solves autonomously. "
+            "Example: vary RefluxRatio until distillate MoleFraction['Methanol'] = 0.99"
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["vary_object", "vary_path", "vary_lo", "vary_hi",
+                          "observe_object", "observe_path", "target"],
+            "properties": {
+                "vary_object":    {"type": "string", "description": "Tag to vary"},
+                "vary_path":      {"type": "string", "description": "Property path to set"},
+                "vary_lo":        {"type": "number"},
+                "vary_hi":        {"type": "number"},
+                "observe_object": {"type": "string", "description": "Tag to observe"},
+                "observe_path":   {"type": "string", "description": "Property path to read"},
+                "target":         {"type": "number"},
+                "tolerance":      {"type": "number", "default": 0.001},
+                "direction":      {"type": "string",
+                                   "description": "'increase' if higher vary → higher observe; else 'decrease'",
+                                   "default": "increase"},
+                "max_iter":       {"type": "integer", "default": 25},
+            },
+        },
+    },
+    # ── Process design advisor ──────────────────────────────────────────────
+    {"name": "process_synthesis",
+     "description": "Suggest complete process flowsheet structure using Douglas Levels 1-5 methodology. Returns reactor type, recycle structure, separation sequence, heat integration targets, utilities, DWSIM unit list. Call first when designing any new process.",
+     "parameters": {"type": "object", "required": ["goal"],
+                    "properties": {"goal": {"type":"string"}, "reactants": {"type":"array","items":{"type":"string"}},
+                                    "products": {"type":"array","items":{"type":"string"}},
+                                    "phase": {"type":"string","default":"liquid"},
+                                    "scale_tonne_h": {"type":"number","default":10}}}},
+    {"name": "equipment_sizing",
+     "description": "Preliminary equipment sizing using Perry's/Turton correlations. Types: heat_exchanger, distillation_column, pump, compressor, flash_drum, absorber.",
+     "parameters": {"type": "object", "required": ["equipment_type"],
+                    "properties": {"equipment_type": {"type":"string"}, "duty_kW": {"type":"number"},
+                                    "flow_m3h": {"type":"number"}, "delta_P_bar": {"type":"number"},
+                                    "T_in_C": {"type":"number"}, "LMTD_C": {"type":"number"},
+                                    "service": {"type":"string","default":"liquid-liquid"},
+                                    "n_theoretical": {"type":"integer","default":20},
+                                    "alpha": {"type":"number","default":2.0}}}},
+    {"name": "separation_sequence",
+     "description": "Suggest separation train sequence (Smith 2005 heuristics). Handles light gases, acid gas, water, azeotropes. Returns ordered separation steps with DWSIM unit types.",
+     "parameters": {"type": "object", "required": ["compounds"],
+                    "properties": {"compounds": {"type":"array","items":{"type":"string"}},
+                                    "property_package": {"type":"string","default":"Peng-Robinson"},
+                                    "purity_target": {"type":"number","default":0.99}}}},
+    {"name": "property_package_selector",
+     "description": "Rigorous thermodynamic property package selection using Carlson (1996) decision tree. Classifies compounds (polar/electrolyte/acid-gas/hydrocarbon) and returns the correct PP with reason and alternatives. ALWAYS call before building a flowsheet.",
+     "parameters": {"type": "object", "required": ["compounds"],
+                    "properties": {"compounds": {"type":"array","items":{"type":"string"}},
+                                    "pressure_bar": {"type":"number","default":1.01325},
+                                    "temperature_C": {"type":"number","default":25},
+                                    "application": {"type":"string","default":""}}}},
+    {"name": "heat_integration_targets",
+     "description": "Compute Pinch Analysis targets using Linnhoff cascade. Returns Q_Hmin, Q_Cmin, pinch temperature, max energy recovery.",
+     "parameters": {"type": "object", "required": ["hot_streams", "cold_streams"],
+                    "properties": {"hot_streams": {"type":"array","description":"[{name,T_in,T_out,duty_kW}]","items":{"type":"object"}},
+                                    "cold_streams": {"type":"array","description":"[{name,T_in,T_out,duty_kW}]","items":{"type":"object"}},
+                                    "delta_T_min_C": {"type":"number","default":10}}}},
+    {"name": "design_checklist",
+     "description": "Return a HAZOP-lite design checklist for a process type: distillation, reactor, heat_exchanger, compressor.",
+     "parameters": {"type": "object", "required": ["process_type"],
+                    "properties": {"process_type": {"type":"string"}}}},
+    # ── DWSIM troubleshooter ────────────────────────────────────────────────
+    {"name": "troubleshoot_dwsim",
+     "description": "Diagnose DWSIM convergence, configuration, and numerical issues. Returns ranked root-cause analysis with step-by-step fixes and DWSIM menu paths. ALWAYS call when a simulation fails or converges poorly. Covers: max iterations, flash failures, column divergence, recycle non-convergence, null references, property package errors, energy balance errors.",
+     "parameters": {"type": "object", "required": ["issue"],
+                    "properties": {"issue": {"type":"string","description":"Error message or description of what went wrong"},
+                                    "process_type": {"type":"string","default":""},
+                                    "symptoms": {"type":"array","items":{"type":"string"}}}}},
+    {"name": "convergence_guide",
+     "description": "Get unit-specific convergence settings and algorithm recommendations for DWSIM unit operations. Covers: DistillationColumn, AbsorptionColumn, Recycle, PFR, CSTR.",
+     "parameters": {"type": "object", "required": ["unit_type"],
+                    "properties": {"unit_type": {"type":"string","description":"e.g. DistillationColumn, Recycle, PFR"}}}},
+    {"name": "numerical_settings_advisor",
+     "description": "Recommend DWSIM numerical solver settings for a specific convergence problem (oscillating, slow, column failure, stiff kinetics).",
+     "parameters": {"type": "object", "required": ["problem_description"],
+                    "properties": {"problem_description": {"type":"string"}}}},
+    {"name": "decode_error",
+     "description": "Decode a DWSIM error message text into human-readable explanation with fix steps. Use when you see a raw DWSIM error string.",
+     "parameters": {"type": "object", "required": ["error_message"],
+                    "properties": {"error_message": {"type":"string"}}}},
+    # ── DWSIM-internal optimization ─────────────────────────────────────────
+    {
+        "name": "dwsim_internal_optimize",
+        "description": (
+            "TRUE DWSIM-internal optimization via OptimizationCase objects — "
+            "IDENTICAL to what the DWSIM GUI Optimizer button does. "
+            "Builds a DWSIM OptimizationCase with OPTVariable objects, sets "
+            "an expression objective using [Tag.PropID] syntax, then runs "
+            "DotNumerics (Simplex, L-BFGS-B, Truncated Newton) or SwarmOps. "
+            "Use this for: any flowsheet where the user says 'use DWSIM "
+            "optimizer', 'optimise like the GUI', or 'run internal optimization'."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "objective"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "description": "Decision variables. Each: {tag, property, unit, lower, upper, initial}",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tag":      {"type": "string"},
+                            "property": {"type": "string"},
+                            "unit":     {"type": "string"},
+                            "lower":    {"type": "number"},
+                            "upper":    {"type": "number"},
+                            "initial":  {"type": "number"},
+                        },
+                        "required": ["tag", "property", "lower", "upper"],
+                    },
+                },
+                "objective": {
+                    "type": "object",
+                    "description": "Objective: {type: 'variable'|'expression', tag, property} OR expression: '[Tag.PropID]'",
+                    "properties": {
+                        "type":       {"type": "string", "enum": ["variable", "expression"]},
+                        "tag":        {"type": "string"},
+                        "property":   {"type": "string"},
+                        "expression": {"type": "string",
+                                        "description": "DWSIM expr, e.g. '[Air.mass_flow_kgh]*0.001+[Soot.mass_flow_kgh]'"},
+                    },
+                },
+                "minimize":   {"type": "boolean", "default": True},
+                "method":     {"type": "string",
+                                "description": "simplex (default), lbfgs, newton, brent, al-lbfgs",
+                                "default": "simplex"},
+                "max_iter":   {"type": "integer", "default": 100},
+                "tolerance":  {"type": "number", "default": 1e-4},
+                "case_name":  {"type": "string", "default": "AI_Optimization"},
+            },
+        },
+    },
+    {
+        "name": "dwsim_optimize",
+        "description": (
+            "Run process optimization using DWSIM's INTERNAL solver engines "
+            "(L-BFGS-B, Nelder-Mead Simplex, Truncated Newton, Powell, "
+            "Differential Evolution) — the same algorithms the DWSIM desktop "
+            "Optimizer uses, driven programmatically. "
+            "USE THIS WHEN: the user explicitly asks for DWSIM's native "
+            "optimizer; OR you have 1-5 decision variables AND a SOLVED "
+            "flowsheet (each evaluation re-solves the flowsheet at new "
+            "values). Returns a poster-style table of Old Value vs New Value "
+            "vs Change for every variable, plus the optimum objective. "
+            "Compared with bayesian_optimize: dwsim_optimize uses gradient/"
+            "simplex search (10-100 evals, good for smooth landscapes); "
+            "bayesian_optimize uses a GP surrogate (5-25 evals, good for "
+            "expensive simulations). "
+            "Examples: 'maximise (H2+CO) purity by tuning RC-01/RC-02/RC-03 "
+            "temperatures', 'minimise reboiler duty subject to reflux 1-5 "
+            "and feed-stage 5-15'."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "objective"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "description": "Decision variables. Each item: {tag, property, unit, lower, upper, initial?}.",
+                    "items": {
+                        "type": "object",
+                        "required": ["tag", "property", "lower", "upper"],
+                        "properties": {
+                            "tag":      {"type": "string"},
+                            "property": {"type": "string"},
+                            "unit":     {"type": "string"},
+                            "lower":    {"type": "number"},
+                            "upper":    {"type": "number"},
+                            "initial":  {"type": "number"},
+                        },
+                    },
+                },
+                "objective": {
+                    "type": "object",
+                    "description": (
+                        "Either {type:'variable', tag, property} for a single-"
+                        "property objective, or {type:'expression', expression, "
+                        "named_values:[{name,tag,property}]} for a composite "
+                        "objective. The expression supports +/-/*/ /**/ and "
+                        "math functions (log, exp, sqrt, sin, cos, abs)."
+                    ),
+                    "properties": {
+                        "type":       {"type": "string",
+                                       "enum": ["variable", "expression"]},
+                        "tag":        {"type": "string"},
+                        "property":   {"type": "string"},
+                        "expression": {"type": "string"},
+                        "named_values": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["name", "tag", "property"],
+                                "properties": {
+                                    "name":     {"type": "string"},
+                                    "tag":      {"type": "string"},
+                                    "property": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["simplex", "lbfgs", "newton", "powell", "de"],
+                    "description": (
+                        "Solver: 'simplex' = Nelder-Mead (default, "
+                        "gradient-free); 'lbfgs' = L-BFGS-B (fast, smooth "
+                        "objectives); 'newton' = Truncated Newton; 'powell' "
+                        "= Powell direction-set; 'de' = Differential "
+                        "Evolution (global, expensive)."
+                    ),
+                    "default": "simplex",
+                },
+                "minimize": {
+                    "type": "boolean",
+                    "description": "True to minimise (default), False to maximise.",
+                    "default": True,
+                },
+                "max_iter": {
+                    "type": "integer",
+                    "description": "Maximum solver iterations (default 50).",
+                    "default": 50,
+                },
+                "tolerance": {
+                    "type": "number",
+                    "description": "Solver convergence tolerance (default 1e-3).",
+                    "default": 1e-3,
+                },
+            },
+        },
+    },
+
     # ── Monte Carlo Uncertainty Propagation ─────────────────────────────────
     {
         "name": "monte_carlo_study",
@@ -1868,11 +2183,13 @@ DWSIM_TOOLS = [
     {
         "name": "optimize_constrained",
         "description": (
-            "Multi-variable optimization WITH inequality constraints — the industrial-grade optimizer. "
+            "Multi-variable optimization WITH nonlinear constraints — the industrial-grade optimizer. "
             "Use when you need to meet product specifications while optimizing yield or energy. "
             "Example: maximize H2 yield subject to CO < 10 ppm and T < 950°C. "
-            "Uses differential evolution with penalty functions for constraint handling. "
-            "constraints format: [{tag, property, unit, operator, value}] where operator is '>=' or '<='."
+            "By default uses NLopt (GN_ISRES) which handles inequality AND equality ('==') constraints "
+            "NATIVELY by searching the feasible region (falls back to differential-evolution + penalty if "
+            "NLopt is unavailable). constraints format: [{tag, property, unit, operator, value}] where "
+            "operator is '>=', '<=' or '=='."
         ),
         "parameters": {
             "type": "object",
@@ -1902,8 +2219,11 @@ DWSIM_TOOLS = [
         "description": (
             "Multi-objective optimization generating a Pareto trade-off curve. "
             "Use when there are competing objectives: e.g. maximize H2 yield AND minimize steam consumption. "
-            "Returns n_points Pareto-optimal solutions showing the trade-off between objectives. "
-            "Uses weighted sum scalarization with differential evolution at each weight combination."
+            "Returns Pareto-optimal solutions showing the trade-off between objectives. "
+            "By default uses NSGA-II (pymoo) — a true non-dominated search that recovers NON-CONVEX Pareto "
+            "fronts in a single run with no manual weights (falls back to weighted-sum scalarization if pymoo "
+            "is unavailable). For NSGA-II the objective entries need only {tag, property, unit, minimize}; "
+            "weight_start/weight_end are used only by the weighted-sum fallback."
         ),
         "parameters": {
             "type": "object",
@@ -1917,14 +2237,178 @@ DWSIM_TOOLS = [
                 "objectives": {
                     "type": "array",
                     "items": {"type": "object"},
-                    "description": "List of {tag, property, unit, minimize, weight_start, weight_end} objectives. weight_start/end define how the weight varies across the Pareto front.",
+                    "description": "List of {tag, property, unit, minimize} objectives (>= 2). weight_start/weight_end are optional and only used by the weighted-sum fallback.",
                 },
-                "n_points": {"type": "integer", "description": "Number of Pareto front points (default 10)"},
-                "max_iter_per_point": {"type": "integer", "description": "Max optimizer iterations per Pareto point (default 50)"},
+                "n_points": {"type": "integer", "description": "Target Pareto points / NSGA-II population (default 10)"},
+                "n_gen": {"type": "integer", "description": "NSGA-II generations (default 15)"},
+                "method": {"type": "string", "description": "'auto' (default, NSGA-II if available), 'nsga2', or 'weighted_sum'"},
                 "seed": {"type": "integer", "description": "Reproducibility seed (default 42)"},
             },
         },
     },
+    {
+        "name": "global_sensitivity",
+        "description": (
+            "GLOBAL sensitivity analysis (SALib): rank decision variables by how much they influence an "
+            "output, INCLUDING interaction effects — which local parametric sweeps cannot reveal. Use this "
+            "BEFORE an expensive optimization to find the variables worth optimizing, or to explain which "
+            "inputs drive a KPI. method 'sobol' gives first-order (S1) and total-order (ST) variance shares "
+            "(ST >> S1 flags interaction-driven inputs); 'morris' is a cheaper screening (mu_star ranking). "
+            "Cost: ~N*(D+2) DWSIM solves for Sobol, so keep n_samples modest."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "output_tag", "output_property"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, lower, upper} decision variables",
+                },
+                "output_tag": {"type": "string", "description": "Stream or unit op tag of the output to analyse"},
+                "output_property": {"type": "string", "description": "Output property (e.g. mole_fraction_h2)"},
+                "method": {"type": "string", "description": "'sobol' (variance-based, default) or 'morris' (screening)"},
+                "n_samples": {"type": "integer", "description": "Base sample size (default 16). Total solves scale with this."},
+                "seed": {"type": "integer", "description": "Reproducibility seed (default 42)"},
+            },
+        },
+    },
+    {
+        "name": "optimize_eo",
+        "description": (
+            "Equation-oriented (EO) optimization — the Aspen-Plus-EO analogue. Builds a smooth algebraic "
+            "surrogate of the flowsheet from a Latin-hypercube DOE, then solves the optimization + model "
+            "SIMULTANEOUSLY as one NLP (IPOPT interior-point via Pyomo when available, else SciPy SLSQP) and "
+            "VALIDATES the optimum with a real DWSIM solve. Uses ADAPTIVE refinement: the validated optimum "
+            "is fed back into the sample pool and the surrogate is refit (one extra solve per round) until the "
+            "surrogate-vs-actual gap is small — so accuracy improves automatically instead of just being "
+            "reported. Best for tightly-coupled, constrained problems where black-box search is slow. Returns "
+            "surrogate_gap, R², converged flag and refinement_history. constraints: [{tag, property, operator, value}]."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["variables", "observe_tag", "observe_property"],
+            "properties": {
+                "variables": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of {tag, property, unit, lower, upper} decision variables",
+                },
+                "observe_tag": {"type": "string", "description": "Stream or unit op tag to observe as objective"},
+                "observe_property": {"type": "string", "description": "Objective property"},
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Optional list of {tag, property, operator, value} constraints",
+                },
+                "minimize": {"type": "boolean", "description": "True=minimize, False=maximize (default True)"},
+                "n_samples": {"type": "integer", "description": "DOE sample size; 0=auto from #variables (default 0)"},
+                "seed": {"type": "integer", "description": "Reproducibility seed (default 42)"},
+            },
+        },
+    },
+    # ── Intent Declaration ───────────────────────────────────────────────────
+    {
+        "name": "declare_intent",
+        "description": (
+            "Declare what this flowsheet is supposed to achieve. The verifier "
+            "uses this to score correctness BEYOND mere convergence — DWSIM "
+            "can converge with mass balance off by 30% or the wrong phase in a "
+            "product stream. Call this ONCE after planning, BEFORE the first "
+            "save_and_solve / build_flowsheet_atomic call. "
+            "After solving, the verifier reports any target that wasn't met, "
+            "with a specific repair_hint per failed target. "
+            "Targets are scored independently — partial success is reported."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["feed_streams", "product_streams"],
+            "properties": {
+                "feed_streams": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags of fresh-feed material streams, e.g. ['BIOGAS-IN','WATER-IN'].",
+                },
+                "product_streams": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags of streams the user cares about as products, e.g. ['HYDROGEN'].",
+                },
+                "note": {
+                    "type": "string",
+                    "description": "One-sentence summary of the user's goal. Shown in the verifier report.",
+                },
+                "targets": {
+                    "type": "array",
+                    "description": (
+                        "List of acceptance criteria. Each item has: "
+                        "kind ('product_purity' | 'max_impurity' | 'min_yield' | 'unit_setpoint'), "
+                        "and the fields appropriate to that kind."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["product_purity", "max_impurity", "min_yield", "unit_setpoint"],
+                            },
+                            "stream_tag":    {"type": "string", "description": "For product_purity / max_impurity."},
+                            "unit_tag":      {"type": "string", "description": "For unit_setpoint."},
+                            "property_name": {"type": "string", "description": "For unit_setpoint (e.g. 'OutletTemperature')."},
+                            "compound":      {"type": "string", "description": "For purity / impurity / yield."},
+                            "expected":      {"type": "number", "description": "Target value (purity 0-1, yield in mol/s, setpoint in SI)."},
+                            "tolerance":     {"type": "number", "description": "Absolute tolerance for unit_setpoint; ignored for others."},
+                        },
+                    },
+                },
+            },
+        },
+    },
+
+    # ── Literature Comparison ────────────────────────────────────────────────
+    {
+        "name": "compare_to_literature",
+        "description": (
+            "Compare DWSIM simulation results against published literature reference values. "
+            "Produces a publication-quality markdown table showing simulated vs. literature "
+            "stream properties and KPIs with deviation percentages. "
+            "Use AFTER save_and_solve / robust_solve to validate accuracy against papers. "
+            "Currently supports: 'biogas_smr_h2' (Ullah et al. 2025, Digital Chem Eng 14:100205), "
+            "'methanol_synthesis', 'ammonia_synthesis'. "
+            "Returns a formatted comparison table for direct inclusion in research reports."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["process"],
+            "properties": {
+                "process": {
+                    "type": "string",
+                    "description": (
+                        "Process key to compare against. "
+                        "Options: 'biogas_smr_h2' (Ullah 2025 biogas-to-H2 SMR), "
+                        "'methanol_synthesis', 'ammonia_synthesis'. "
+                        "Use 'biogas_smr_h2' for the hydrogen production flowsheet."
+                    ),
+                    "enum": ["biogas_smr_h2", "methanol_synthesis", "ammonia_synthesis"],
+                },
+                "tolerance_pct": {
+                    "type": "number",
+                    "description": (
+                        "Acceptable deviation percentage for PASS/FAIL classification. "
+                        "Default 5%. Use 10% for order-of-magnitude validation."
+                    ),
+                    "default": 5.0,
+                },
+                "include_kpis": {
+                    "type": "boolean",
+                    "description": "Whether to compare process-level KPIs in addition to stream properties. Default true.",
+                    "default": True,
+                },
+            },
+        },
+    },
+
     {
         "name": "parametric_study_2d",
         "description": (
@@ -1953,6 +2437,342 @@ DWSIM_TOOLS = [
                                      "description": "List of values for variable 2"},
                 "observe_tag":      {"type": "string"},
                 "observe_property": {"type": "string"},
+            },
+        },
+    },
+
+    # ─── Industrial-grade tools (Phase 3 additions) ──────────────────────────
+    {
+        "name": "preflight_validate",
+        "description": (
+            "Pre-solve validation of the current flowsheet topology. Catches "
+            "~50% of convergence issues without running the (expensive) DWSIM "
+            "solver: missing inlets, orphan objects, self-loops, no feed streams, "
+            "missing compounds or property package. ALWAYS call this BEFORE "
+            "save_and_solve when you've made significant changes."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "detect_tear_streams",
+        "description": (
+            "For flowsheets with recycle loops, identify the minimum set of "
+            "tear streams (cycle-breaking edges) via the Pho-Lapidus algorithm. "
+            "Returns a list of stream connections that should be 'torn' for "
+            "convergence. Call this before configuring recycle blocks."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "synthesize_hen",
+        "description": (
+            "Heat Exchanger Network synthesis via Linnhoff-Hindmarsh. "
+            "Returns suggested HX matches with duties and areas, plus residual "
+            "hot/cold utility requirements. Prerequisite: streams with valid "
+            "T_supply, T_target, and heat_duty (run simulation first)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "delta_t_min_C": {"type": "number", "default": 10.0,
+                                  "description": "Minimum approach temperature in °C"},
+            },
+        },
+    },
+    {
+        "name": "diagnose_convergence",
+        "description": (
+            "After a failed solve, run root-cause analysis. Identifies which "
+            "stream(s) are unphysical, which unit op upstream is the actual "
+            "root cause, and provides a ranked list of suggested fixes."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_process_templates",
+        "description": (
+            "List the 10+ curated industrial flowsheet templates: methanol "
+            "synthesis, SMR, amine sweetening, glycol dehydration, NGL recovery, "
+            "ASU, crude distillation, Claus sulfur, ammonia synthesis, FT, MTBE, "
+            "and more. Use a template as a starting point instead of building "
+            "from scratch."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category":   {"type": "string", "description": "Filter: petrochemical, gas-processing, refinery, simple"},
+                "complexity": {"type": "string", "description": "Filter: beginner, intermediate, advanced"},
+            },
+        },
+    },
+    {
+        "name": "get_process_template",
+        "description": (
+            "Get the full JSON spec for a process template (compounds, "
+            "property package, streams, unit ops, connections, expected results). "
+            "Pass the spec to build_flowsheet_atomic or process step-by-step."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["template_id"],
+            "properties": {
+                "template_id": {"type": "string",
+                                "description": "e.g. 'methanol_synthesis_loop', 'smr_hydrogen'"},
+            },
+        },
+    },
+    {
+        "name": "instantiate_process_template",
+        "description": (
+            "PREFERRED tool for building complex industrial flowsheets (10+ unit ops). "
+            "Deterministically constructs the entire DWSIM flowsheet from a curated "
+            "template in one call — creates compounds, property package, all unit ops, "
+            "all streams, connections, and feed specs. Returns step-by-step build log "
+            "with per-step success/failure. After this returns, the flowsheet is ready "
+            "to be solved (call save_and_solve OR set solve=true here). "
+            "Use this instead of issuing 20+ add_object/connect_streams/set_* calls."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["template_id"],
+            "properties": {
+                "template_id": {"type": "string",
+                                "description": "e.g. 'methanol_synthesis_loop', 'smr_hydrogen', 'amine_sweetening', 'flash_drum_2phase'"},
+                "overrides": {
+                    "type": "object",
+                    "description": (
+                        "Optional parameter overrides keyed by 'tag.property_name', e.g. "
+                        "{'syngas_feed.T_C': 35, 'R-101.outlet_T_C': 280}."
+                    ),
+                },
+                "solve": {
+                    "type": "boolean",
+                    "description": "If true, run save_and_solve after build. Default false.",
+                    "default": False,
+                },
+            },
+        },
+    },
+    {
+        "name": "execute_build_plan",
+        "description": (
+            "PREFERRED tool for building any AD-HOC flowsheet (not in the template "
+            "library). Emit the COMPLETE plan in ONE call — do NOT issue separate "
+            "add_object / connect_streams / set_stream_property calls. The Python "
+            "executor walks the plan deterministically with per-step error reporting. "
+            "Use this for: water heater, simple flash, custom reactor train, anything "
+            "the user describes in natural language that isn't a named template. "
+            "Plan shape: {name, compounds[], property_package, streams[{tag,T_C,P_bar,"
+            "flow_kmol_h,compositions{}}], unit_ops[{tag,type,params{}}], "
+            "connections[{from,to,from_port,to_port}]}."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["plan"],
+            "properties": {
+                "plan": {
+                    "type": "object",
+                    "description": (
+                        "Complete flowsheet plan. Required keys: compounds (list), "
+                        "property_package (str), streams (list), unit_ops (list), "
+                        "connections (list). Optional: name (str)."
+                    ),
+                    "properties": {
+                        "name": {"type": "string"},
+                        "compounds": {"type": "array", "items": {"type": "string"}},
+                        "property_package": {"type": "string"},
+                        "streams": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "tag": {"type": "string"},
+                                    "T_C": {"type": "number"},
+                                    "T_K": {"type": "number"},
+                                    "P_bar": {"type": "number"},
+                                    "P_Pa": {"type": "number"},
+                                    "flow_kmol_h": {"type": "number"},
+                                    "flow_kg_h": {"type": "number"},
+                                    "compositions": {"type": "object"},
+                                },
+                            },
+                        },
+                        "unit_ops": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "tag": {"type": "string"},
+                                    "type": {"type": "string",
+                                             "description": "DWSIM unit-op class name, e.g. Heater, Cooler, Mixer, Splitter, Flash, Heat_Exchanger, Distillation, Pump, Compressor, Conversion_Reactor, CSTR, PFR, Gibbs_Reactor"},
+                                    "params": {"type": "object"},
+                                },
+                            },
+                        },
+                        "connections": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "from": {"type": "string"},
+                                    "to":   {"type": "string"},
+                                    "from_port": {"type": "integer", "default": 0},
+                                    "to_port":   {"type": "integer", "default": 0},
+                                },
+                            },
+                        },
+                    },
+                },
+                "solve": {
+                    "type": "boolean",
+                    "description": "If true, run save_and_solve after build. Default false.",
+                    "default": False,
+                },
+            },
+        },
+    },
+    {
+        "name": "generate_pfd",
+        "description": (
+            "Generate a Process Flow Diagram (PFD) as an SVG image showing all "
+            "objects and connections in the current flowsheet. Useful for "
+            "visualizing the topology before showing the user."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_reactions",
+        "description": (
+            "Browse the curated reaction kinetics database (11 reactions: SMR, "
+            "WGS, methanol, ammonia, FT, ethane cracking, MTBE, Claus, methane "
+            "combustion). Returns reaction list with catalysts and validity ranges."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "catalyst": {"type": "string", "description": "Filter by catalyst, e.g. 'Cu'"},
+                "reactant": {"type": "string", "description": "Filter by reactant name"},
+            },
+        },
+    },
+    {
+        "name": "get_reaction_kinetics",
+        "description": (
+            "Get full kinetic spec for a reaction: rate form, Arrhenius constants, "
+            "validity range, reference. Use this to configure CSTR/PFR reactors."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["reaction_id"],
+            "properties": {
+                "reaction_id": {"type": "string",
+                                "description": "e.g. 'smr_main', 'methanol_synthesis_co'"},
+            },
+        },
+    },
+    {
+        "name": "suggest_kinetics_for_reaction",
+        "description": (
+            "Given a list of reactants and operating conditions (T, P), suggest "
+            "matching reactions from the kinetics database with match scores."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["reactants"],
+            "properties": {
+                "reactants": {"type": "array", "items": {"type": "string"},
+                              "description": "Reactant names, e.g. ['Methane', 'Water']"},
+                "T_K":       {"type": "number", "description": "Operating temperature in K (optional)"},
+                "P_bar":     {"type": "number", "description": "Operating pressure in bar (optional)"},
+            },
+        },
+    },
+
+    # ─── CAPE-OPEN integration (Phase 6 additions) ───────────────────────────
+    {
+        "name": "discover_cape_open_components",
+        "description": (
+            "Scan the Windows registry for all installed CAPE-OPEN components "
+            "(third-party unit operations, property packages, reaction packages, "
+            "equilibrium solvers). Returns CLSIDs, names, vendors, and DLL paths. "
+            "CAPE-OPEN is the open interoperability standard — use this to plug "
+            "in commercial unit ops like Sulzer SULCOL, ChemSep columns, or "
+            "vendor-supplied custom reactors. Returns empty list with explanation "
+            "if no CO components are installed."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional filter: UnitOperation, PropertyPackage, "
+                                   "ReactionPackage, EquilibriumSolver, PropertyPackageManager",
+                },
+            },
+        },
+    },
+    {
+        "name": "add_cape_open_unit",
+        "description": (
+            "Add a CAPE-OPEN unit operation to the current flowsheet. First call "
+            "discover_cape_open_components to find available components, then "
+            "pass the CLSID (e.g. '{12345678-1234-1234-1234-123456789012}') or "
+            "ProgID (e.g. 'ChemSep.Column.1'). Creates a CapeOpenUO placeholder "
+            "in DWSIM and binds the COM object to it."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["tag", "clsid_or_progid"],
+            "properties": {
+                "tag":             {"type": "string", "description": "Flowsheet tag for the new unit op"},
+                "clsid_or_progid": {"type": "string", "description": "CLSID (with braces) or ProgID of the CO component"},
+            },
+        },
+    },
+    {
+        "name": "list_cape_open_parameters",
+        "description": (
+            "Enumerate parameters of a CAPE-OPEN unit op already added to the "
+            "flowsheet. Returns parameter names, current values, mode (input/output), "
+            "and specification. Use this to discover what's configurable on a "
+            "third-party CO component."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["tag"],
+            "properties": {
+                "tag": {"type": "string", "description": "Flowsheet tag of the CO unit op"},
+            },
+        },
+    },
+    {
+        "name": "list_cape_open_ports",
+        "description": (
+            "Enumerate input and output ports of a CAPE-OPEN unit op. Returns "
+            "port names, direction (input/output), and connection status. Use this "
+            "to understand how to wire the CO unit op into the flowsheet."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["tag"],
+            "properties": {
+                "tag": {"type": "string", "description": "Flowsheet tag of the CO unit op"},
+            },
+        },
+    },
+    {
+        "name": "set_cape_open_parameter",
+        "description": (
+            "Set a parameter on a CAPE-OPEN unit op. Use list_cape_open_parameters "
+            "first to discover valid parameter names and types."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["tag", "parameter_name", "value"],
+            "properties": {
+                "tag":            {"type": "string"},
+                "parameter_name": {"type": "string"},
+                "value":          {"description": "Value to set (string, number, or boolean)"},
             },
         },
     },

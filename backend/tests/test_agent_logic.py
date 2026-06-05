@@ -515,7 +515,7 @@ class TestReplayLog:
 
     def test_turn_serialises_to_dict(self):
         from replay_log import TurnBuilder, ReplayTurn
-        b = TurnBuilder("s2", 1, "gemini", "gemini-flash", 0.0, 42)
+        b = TurnBuilder("s2", 1, "openai", "gpt-4o", 0.0, 42)
         b.set_prompt("test", "sys")
         turn = b.finish("answer", False, {}, [])
         d = turn.to_dict()

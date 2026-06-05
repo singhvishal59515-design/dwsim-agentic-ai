@@ -780,6 +780,61 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
         "source": "Aasberg-Petersen et al. (2011); IEA: The Future of Hydrogen",
     },
     {
+        "id": "smr_dwsim_configuration",
+        "title": "SMR Flowsheet DWSIM Configuration — Gibbs vs Equilibrium vs Conversion Reactors",
+        "text": (
+            "For the SMR hydrogen flowsheet in DWSIM, three reactor types are used at different stages: "
+            "1) REFORMER — use the Gibbs Reactor (not Equilibrium Reactor). "
+            "   The Gibbs reactor minimises total Gibbs free energy and handles simultaneous "
+            "   CH4+H2O->CO+3H2 and CO+H2O->CO2+H2 automatically without specifying individual reactions. "
+            "   Add species: Methane, Water, Carbon monoxide, Carbon dioxide, Hydrogen. "
+            "   Set temperature 800-900 degC (1073-1173 K), pressure 15-30 bar. "
+            "   Do NOT use a Conversion Reactor for the reformer — conversion depends on T, P, S/C ratio. "
+            "2) HTS (High-Temperature Shift) — use Conversion Reactor or Equilibrium Reactor. "
+            "   Reaction: CO + H2O -> CO2 + H2. Temperature: 350-400 degC. Pressure: same as reformer. "
+            "   Typical CO conversion at HTS: 70-80%. "
+            "   In DWSIM Conversion Reactor: set CO as reactant, conversion fraction ~0.75, "
+            "   stoichiometry CO:H2O=-1:-1 and CO2:H2=+1:+1 (molar coefficients). "
+            "3) LTS (Low-Temperature Shift) — use Conversion Reactor. "
+            "   Same reaction as HTS. Temperature: 200-230 degC. CO conversion 85-95% cumulative. "
+            "   Set conversion fraction ~0.90 (relative to LTS inlet CO). "
+            "DWSIM Gibbs Reactor setup: add all species to the compound list before setup. "
+            "The Gibbs reactor requires no reaction specification — it finds equilibrium automatically. "
+            "Equilibrium Reactor in DWSIM: requires explicit stoichiometry and Kp expressions "
+            "or approach temperature — more complex to configure than Gibbs reactor. "
+            "Recommendation: always use Gibbs Reactor for the SMR reformer stage."
+        ),
+        "tags": ["SMR", "DWSIM", "Gibbs reactor", "equilibrium reactor", "conversion reactor",
+                 "HTS", "LTS", "water-gas shift", "hydrogen", "reformer", "configuration"],
+        "source": "DWSIM Documentation; Aasberg-Petersen et al. (2011)",
+    },
+    {
+        "id": "psa_dwsim_modelling",
+        "title": "Pressure Swing Adsorption (PSA) Modelling in DWSIM via Component Separator",
+        "text": (
+            "PSA is not a native DWSIM unit operation — approximate it using a Component Separator "
+            "configured with species-specific separation factors. "
+            "PSA function in hydrogen plants: separates H2 from CO, CO2, CH4, H2O. "
+            "Typical PSA performance: H2 recovery 70-90%; H2 purity in product >99.9%. "
+            "Contaminants (CO, CO2, CH4, H2O) report to tail gas for combustor heat recovery. "
+            "DWSIM Component Separator setup for PSA approximation: "
+            "1) Add Component Separator unit operation. "
+            "2) Connect feed (H2+CO+CO2+CH4+H2O) and two outlets: "
+            "   Outlet 1 = H2 product (high purity), Outlet 2 = tail gas/offgas. "
+            "3) Set split fractions to Outlet 1 (fraction of each component to product): "
+            "   Hydrogen: 0.85 (85% H2 recovery), "
+            "   Carbon monoxide: 0.005, Carbon dioxide: 0.005, Methane: 0.005, Water: 0.001. "
+            "4) Tail gas (Outlet 2) connects to combustor/burner for heat recovery. "
+            "Pre-PSA step: cool reformed gas to 30-40 degC with a Cooler to condense water. "
+            "PSA operating pressure: typically same as reformer pressure (10-30 bar). "
+            "If Component Separator is unavailable, use a manual Stream Splitter with "
+            "component fractions set to approximate the above separation factors."
+        ),
+        "tags": ["PSA", "pressure swing adsorption", "DWSIM", "component separator",
+                 "H2 purification", "hydrogen", "separation factors", "tail gas", "SMR"],
+        "source": "Sircar & Golden (2000) Separation Science; DWSIM Documentation",
+    },
+    {
         "id": "hydrogen_electrolysis",
         "title": "Water Electrolysis for Green Hydrogen",
         "text": (
@@ -2783,6 +2838,393 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
         "source": "Shahriari et al.: Taking the Human Out of the Loop, IEEE 2016; Jones et al.: Efficient Global Optimization, JOGO 1998",
     },
 
+    {
+        "id": "opt_surrogate_assisted",
+        "title": "Surrogate-Assisted Optimisation for Complex / Expensive Flowsheets",
+        "text": (
+            "Surrogate-assisted optimisation (also called Efficient Global "
+            "Optimisation, EGO) is the method of choice when a single flowsheet "
+            "solve is SLOW — recycle-heavy, column-laden or reactor trains where "
+            "tear-stream convergence makes each evaluation take seconds to minutes. "
+            "A direct global optimiser (differential evolution, PSO) needs hundreds "
+            "of REAL solves and becomes impractical; the surrogate approach bounds "
+            "the number of real solves to a small fixed budget. "
+            "How it works: "
+            "(1) Sample the design space with a Latin hypercube and evaluate a SMALL "
+            "fixed budget (n_initial) of points on the REAL flowsheet. "
+            "(2) Fit a kriging / Gaussian-process surrogate to those points — it "
+            "predicts the objective AND its uncertainty everywhere. "
+            "(3) Search the CHEAP surrogate globally with Expected Improvement — "
+            "thousands of surrogate evaluations, ZERO real solves. "
+            "(4) VALIDATE only the single most-promising point on the real flowsheet, "
+            "add it to the training set, refit, and repeat for n_refine rounds. "
+            "Key property: total real (slow) solves = n_initial + n_refine, "
+            "INDEPENDENT of how many surrogate evaluations the search performs or of "
+            "the problem dimension. In practice this reaches the optimum in ~15–25 "
+            "real solves instead of the hundreds a direct optimiser needs. "
+            "How it differs from plain Bayesian optimisation: BO is sequential and "
+            "EI-driven (one real eval per iteration); surrogate-assisted EGO does a "
+            "global search of the fitted surrogate between validations, which scales "
+            "better to multi-variable complex flowsheets. "
+            "When to use which: fast solves (<1 s) and ≤4 vars → direct DotNumerics/"
+            "IPOPT; expensive solves and a complex (recycle/column) flowsheet → "
+            "surrogate-assisted EGO; noisy/multimodal but cheap → differential "
+            "evolution; visualisation → parametric study. "
+            "Robustness notes: failed (non-converging) evaluations are simply dropped "
+            "from the surrogate training set rather than poisoning gradient estimates; "
+            "always verify the surrogate's predicted optimum on the true flowsheet "
+            "before trusting it, because a surrogate can be confidently wrong in "
+            "unsampled regions. The literature shows surrogate-based Pareto fronts can "
+            "dominate direct NSGA-II results for LNG / cryogenic / distillation "
+            "flowsheets where evaluations are slow and noisy."
+        ),
+        "tags": ["surrogate", "surrogate-assisted optimization", "EGO",
+                 "efficient global optimization", "kriging", "Gaussian process",
+                 "complex flowsheet", "expensive simulation", "recycle",
+                 "multi-start", "differential evolution", "Expected Improvement",
+                 "black-box optimization", "DWSIM optimization"],
+        "source": "Jones, Schonlau & Welch: Efficient Global Optimization, JOGO 1998; "
+                  "dos Santos et al.: Kriging surrogate for LNG, Applied Energy 310 (2022)",
+    },
+
+    {
+        "id": "opt_algorithms_families",
+        "title": "Optimisation Algorithm Families: Gradient-Based, Derivative-Free, Global & Interior-Point",
+        "text": (
+            "Flowsheet optimisation is a BLACK-BOX problem: the objective is computed "
+            "by re-solving the simulation, with no analytic derivatives. Four solver "
+            "families are used, each with a different sweet spot. "
+            "(1) GRADIENT-BASED (quasi-Newton): L-BFGS / L-BFGS-B and Truncated Newton "
+            "use finite-difference gradients to descend quickly. Best for SMOOTH "
+            "objectives with few variables; fast, but a noisy or discontinuous "
+            "flowsheet objective corrupts the finite-difference gradient and they can "
+            "stall. L-BFGS-B and Truncated-Newton's bounded variants honour variable "
+            "bounds. "
+            "(2) SEQUENTIAL QUADRATIC PROGRAMMING (SQP, e.g. SciPy SLSQP): the standard "
+            "for smooth CONSTRAINED nonlinear problems — it builds a quadratic model "
+            "and linearised constraints each step. The closest black-box analogue to "
+            "Aspen's SQP optimiser (but with finite-difference, not analytic, "
+            "Jacobians). "
+            "(3) DERIVATIVE-FREE direct search: Nelder-Mead simplex and Powell make NO "
+            "gradient estimate, so they tolerate NOISE and mild discontinuity — the "
+            "robust default for messy flowsheet objectives, at the cost of more "
+            "evaluations and only local convergence. "
+            "(4) GLOBAL / METAHEURISTIC: Differential Evolution (DE), Particle Swarm "
+            "(PSO), Simulated Annealing (SA), Genetic Algorithms (GA), and Hooke–Jeeves "
+            "/ hill-climbing pattern search. These explore MULTIMODAL landscapes and "
+            "escape local optima, needing 100s of evaluations (DE/PSO maintain a "
+            "population; SA uses a cooling schedule of probabilistic uphill moves). "
+            "(5) INTERIOR-POINT NLP: IPOPT solves large constrained NLPs via a "
+            "log-barrier with an adaptive barrier parameter and a limited-memory "
+            "(L-BFGS) Hessian; powerful when real constraints are present. "
+            "Decision guide: smooth + few vars → L-BFGS-B or SLSQP; noisy → Nelder-Mead "
+            "or DE; multimodal/global needed → DE/PSO; constrained NLP → IPOPT or SLSQP; "
+            "expensive solves → surrogate (see Surrogate-Assisted Optimisation). Always "
+            "set physically-reasoned bounds and use multi-start to mitigate local "
+            "optima and finite-difference noise."
+        ),
+        "tags": ["optimization algorithm", "solver selection", "L-BFGS", "quasi-Newton",
+                 "SQP", "SLSQP", "Nelder-Mead", "simplex", "Powell", "truncated Newton",
+                 "differential evolution", "particle swarm", "simulated annealing",
+                 "genetic algorithm", "Hooke-Jeeves", "IPOPT", "interior point",
+                 "derivative-free", "global optimization", "metaheuristic", "black-box"],
+        "source": "Nocedal & Wright, Numerical Optimization; Wächter & Biegler (IPOPT), Math. Prog. 2006; DotNumerics library",
+    },
+    {
+        "id": "opt_multiobjective",
+        "title": "Multi-Objective Optimisation: Pareto Fronts, Weighted-Sum, ε-Constraint, NSGA-II",
+        "text": (
+            "Many process problems trade off competing objectives — e.g. maximise "
+            "yield/purity WHILE minimising energy or cost. There is no single optimum; "
+            "the answer is a PARETO FRONT: the set of non-dominated points where you "
+            "cannot improve one objective without worsening another. The engineer then "
+            "picks an operating point from the front by judgement. "
+            "Scalarisation methods (turn many objectives into one, solved repeatedly): "
+            "(a) WEIGHTED SUM — minimise Σ wi·fi for a sweep of weight vectors w; "
+            "simple and fast, and the method this system uses to generate a front, but "
+            "it cannot reach points on a NON-CONVEX part of the front. "
+            "(b) ε-CONSTRAINT — optimise one objective while constraining the others to "
+            "≤ εj, sweeping the ε bounds; it CAN capture non-convex fronts and is the "
+            "preferred rigorous scalarisation. "
+            "Population methods: NSGA-II (Non-dominated Sorting Genetic Algorithm) "
+            "evolves a whole population toward the front in one run using non-dominated "
+            "sorting + crowding-distance to spread points; it handles non-convex and "
+            "discontinuous fronts but needs many evaluations. A documented best "
+            "practice for expensive flowsheets is to build a surrogate and run the "
+            "ε-constraint or NSGA-II search ON the cheap surrogate — surrogate-based "
+            "fronts have been shown to DOMINATE direct NSGA-II for slow LNG/cryogenic "
+            "problems. "
+            "Practical guidance: for 2 objectives and cheap solves, a weighted-sum or "
+            "ε-constraint sweep of ~10–20 points is enough; for non-convex trade-offs "
+            "use ε-constraint; for many objectives or rugged fronts, NSGA-II. Report "
+            "the front, not a single number, and state the chosen compromise point."
+        ),
+        "tags": ["multi-objective", "Pareto front", "weighted sum", "epsilon constraint",
+                 "NSGA-II", "non-dominated sorting", "trade-off", "yield vs energy",
+                 "scalarization", "crowding distance", "optimization"],
+        "source": "Deb: NSGA-II, IEEE Trans. Evol. Comp. 2002; Miettinen, Nonlinear Multiobjective Optimization",
+    },
+    {
+        "id": "opt_constraints",
+        "title": "Constraint Handling in Optimisation: Penalty, Barrier & Native Constrained Solvers",
+        "text": (
+            "Process optimisation almost always has CONSTRAINTS — purity ≥ spec, "
+            "temperature ≤ limit, recovery ≥ target, pressure within bounds. Two ways "
+            "to enforce them with a black-box simulator: "
+            "(1) PENALTY methods (the common, solver-agnostic approach): add a penalty "
+            "to the objective for any violation, e.g. f_aug = f + k·Σ max(0, gj)^2 for "
+            "inequality constraints gj ≤ 0. Simple and works with ANY optimiser, but "
+            "the penalty weight k matters: too small and constraints are weakly "
+            "enforced (the optimum drifts into infeasibility); too large and the "
+            "landscape becomes ill-conditioned. A practical recipe is a moderately "
+            "large fixed weight (e.g. 1e6 on a normalised violation) or a progressively "
+            "increasing weight. This system uses a squared-violation penalty. "
+            "(2) NATIVE constrained solvers: SLSQP and trust-constr (SciPy) and IPOPT "
+            "accept constraints directly as functions, handling them with Lagrange "
+            "multipliers / a log-barrier rather than a penalty — more accurate near the "
+            "constraint boundary, and they return multiplier (sensitivity) information. "
+            "Failed solves: when a flowsheet does not converge at a trial point, return "
+            "a large finite penalty (not ±infinity, which breaks finite-difference "
+            "solvers) so the optimiser steers away. "
+            "Always also enforce variable BOUNDS explicitly (box constraints) and check "
+            "feasibility of the reported optimum on the true flowsheet — an optimiser "
+            "can sit just outside a softly-penalised constraint."
+        ),
+        "tags": ["constraint handling", "penalty method", "barrier method", "SLSQP",
+                 "trust-constr", "IPOPT", "inequality constraint", "feasibility",
+                 "Lagrange multiplier", "bounds", "constrained optimization"],
+        "source": "Nocedal & Wright, Numerical Optimization Ch. 17; Biegler, Nonlinear Programming (SIAM)",
+    },
+
+    # ══════════════════════════════════════════════════════════
+    # SOLIDS PROCESSING & MECHANICAL SEPARATIONS
+    # (targeted gap-fill — these topics were under-covered)
+    # ══════════════════════════════════════════════════════════
+    {
+        "id": "solids_filtration",
+        "title": "Filtration: Cake & Depth Filtration, Resistance, Equipment",
+        "text": (
+            "Filtration separates solids from a fluid by passing the slurry through "
+            "a porous medium that retains the particles. Two regimes: CAKE filtration "
+            "(particles build a cake on the surface — most common for slurries > ~1 % "
+            "solids) and DEPTH filtration (particles captured within the medium — for "
+            "dilute suspensions / polishing). "
+            "Governing equation (cake filtration, constant pressure): the flow obeys a "
+            "form of Darcy's law where the rate dV/dt = (A^2·ΔP) / (μ·(α·c·V + A·Rm)), "
+            "with α the specific cake resistance (m/kg), c the slurry solids "
+            "concentration (kg/m^3), Rm the medium resistance, μ the filtrate "
+            "viscosity, A the area and ΔP the pressure drop. Integrating at constant "
+            "ΔP gives the classic linear t/V vs V plot whose slope yields α — a "
+            "compressible cake has α increasing with ΔP (α = α0·ΔP^s, s = "
+            "compressibility index). "
+            "Equipment: plate-and-frame and recessed-plate filter presses (batch, high "
+            "ΔP, sharp cakes); rotary vacuum drum filters (continuous, moderate "
+            "loading); leaf and candle filters; cartridge/bag filters (polishing); "
+            "belt filters. Cake washing and dewatering (air blow) follow filtration. "
+            "Selection: presses for high-value or fine solids and sharp separation; "
+            "rotary vacuum for continuous high-throughput; cartridges for clarification. "
+            "Note: DWSIM is a fluid-phase simulator and does not rigorously model "
+            "filtration — represent it as a component splitter / separator with a "
+            "specified solids recovery."
+        ),
+        "tags": ["filtration", "filter press", "rotary vacuum filter", "cake resistance",
+                 "specific cake resistance", "solid-liquid separation", "dewatering",
+                 "Darcy", "mechanical separation", "solids processing"],
+        "source": "McCabe, Smith & Harriott, Unit Operations Ch. 30; Perry's 9th ed. Sec. 18",
+    },
+    {
+        "id": "solids_centrifuge_sediment",
+        "title": "Centrifugation, Sedimentation & Thickening",
+        "text": (
+            "Sedimentation and centrifugation separate solids from liquids by density "
+            "difference. SEDIMENTATION uses gravity: a particle of diameter d settles "
+            "at the Stokes terminal velocity vt = g·d^2·(ρp − ρf) / (18·μ) in the "
+            "laminar (Re < 1) regime; for larger particles use the intermediate or "
+            "Newton's-law drag correlations. Thickeners and clarifiers apply this in "
+            "continuous units (underflow = thickened sludge, overflow = clarified "
+            "liquid); design uses the Coe–Clevenger or Talmadge–Fitch batch-settling "
+            "flux method to size the area. "
+            "CENTRIFUGATION multiplies the driving force by the centrifugal "
+            "acceleration: the separation factor is ω^2·r / g (often hundreds to "
+            "100 000×g), so fine particles or near-density solids that never settle by "
+            "gravity separate quickly. Equipment: tubular-bowl and disc-stack "
+            "centrifuges (clarification, very fine solids), decanter/scroll "
+            "centrifuges (continuous dewatering of higher-solids slurries), and basket "
+            "centrifuges (filtering centrifuges for crystalline cakes). The 'sigma' (Σ) "
+            "theory scales centrifuge capacity: Q = 2·vt·Σ. "
+            "Selection: gravity thickeners for large, cheap, easily-settling streams; "
+            "centrifuges where particles are fine, density difference is small, or a "
+            "compact/clarified product is needed."
+        ),
+        "tags": ["centrifugation", "sedimentation", "thickener", "clarifier",
+                 "Stokes law", "terminal velocity", "decanter centrifuge",
+                 "disc stack", "sigma theory", "solid-liquid separation",
+                 "solids processing"],
+        "source": "McCabe, Smith & Harriott, Unit Operations Ch. 29–31; Coulson & Richardson Vol. 2",
+    },
+    {
+        "id": "solids_size_reduction",
+        "title": "Size Reduction (Comminution): Crushing & Grinding",
+        "text": (
+            "Size reduction (comminution) decreases particle size to increase surface "
+            "area, liberate components, or meet a product spec. Energy laws relate "
+            "specific energy E to the size change: "
+            "Rittinger's law (E ∝ new surface, best for fine grinding): "
+            "E = Kr·(1/d2 − 1/d1). "
+            "Kick's law (E ∝ volume ratio, coarse crushing): E = Kk·ln(d1/d2). "
+            "Bond's law (the practical workhorse): E = 10·Wi·(1/√d2 − 1/√d1), where Wi "
+            "is the Bond Work Index (kWh/short ton, a material property) and d is the "
+            "80 %-passing size in µm. Bond's law sits between Kick and Rittinger and is "
+            "used for sizing crushers and mills. "
+            "Equipment by duty: jaw, gyratory and cone CRUSHERS for coarse feed; "
+            "hammer and impact mills for intermediate; ball, rod, and SAG mills for "
+            "fine grinding; fluid-energy (jet) mills for ultrafine/micronising. "
+            "Closed-circuit grinding with a classifier (screen or cyclone) recycles "
+            "oversize to control product size distribution. Grinding is energy-"
+            "intensive and inefficient (often < 1 % of input energy creates new "
+            "surface), so it is a major OPEX item in minerals and cement."
+        ),
+        "tags": ["size reduction", "comminution", "crushing", "grinding", "ball mill",
+                 "Bond work index", "Rittinger", "Kick", "Bond law", "crusher",
+                 "milling", "solids processing"],
+        "source": "McCabe, Smith & Harriott, Unit Operations Ch. 28; Perry's 9th ed. Sec. 21",
+    },
+    {
+        "id": "solids_fluidization",
+        "title": "Fluidization & Fluidized Beds",
+        "text": (
+            "A bed of particles becomes FLUIDIZED when an upward gas (or liquid) "
+            "velocity makes the drag force balance the bed weight, so the solids "
+            "behave like a boiling liquid. The minimum fluidization velocity Umf is "
+            "found by equating the pressure drop across the bed to its weight per area: "
+            "ΔP = (1 − ε)·(ρp − ρf)·g·L; combined with the Ergun equation this gives "
+            "Umf. Below Umf the bed is a fixed (packed) bed; above it, regimes progress "
+            "from bubbling → slugging → turbulent → fast/pneumatic transport as "
+            "velocity rises. Geldart's classification (A, B, C, D) predicts the "
+            "fluidization behaviour from particle size and density. "
+            "Why it matters: fluidized beds give excellent gas–solid contact, near-"
+            "isothermal operation (high solids mixing), and high heat-transfer "
+            "coefficients — used in FCC, fluid-bed combustion, gasification, catalytic "
+            "reactors, drying and coating. Trade-offs: solids attrition, catalyst "
+            "carry-over (needs cyclones), back-mixing, and erosion. "
+            "Fixed-bed vs fluidized-bed reactor choice: fixed beds for high conversion "
+            "and plug-flow selectivity with robust catalyst; fluidized beds when strong "
+            "temperature control, catalyst regeneration, or solids handling dominate."
+        ),
+        "tags": ["fluidization", "fluidized bed", "minimum fluidization velocity",
+                 "Umf", "Ergun equation", "Geldart classification", "bubbling bed",
+                 "fluid bed reactor", "gas-solid", "solids processing"],
+        "source": "Kunii & Levenspiel, Fluidization Engineering; Perry's 9th ed. Sec. 17",
+    },
+    {
+        "id": "dwsim_dynamic_simulation",
+        "title": "Dynamic (Transient) Simulation in DWSIM",
+        "text": (
+            "Beyond steady state, DWSIM offers a DYNAMIC mode that integrates the "
+            "flowsheet through time to study start-up, shutdown, disturbances and "
+            "control. Key differences from steady state: vessels and tanks need a "
+            "geometry and hold-up (so accumulation dM/dt and dE/dt are integrated); "
+            "valves and equipment get pressure-flow relationships so the pressure-flow "
+            "network is solved each step; and an integrator (with a chosen time step "
+            "and an Integrator control panel) advances the simulation. "
+            "Workflow: build and converge the steady-state flowsheet first; switch the "
+            "flowsheet to Dynamic mode; assign dynamic properties (vessel volumes, "
+            "valve Cv, controller PV/OP/SP); add PID controllers and connect them to "
+            "manipulated/measured variables; set the integrator step and run. Use "
+            "Events/schedules to impose step changes or ramps for disturbance studies. "
+            "Common uses: tuning PID loops on a realistic model, surge/level control, "
+            "verifying that a control scheme rejects feed disturbances, and emergency/"
+            "relief scenario timing. Pitfalls: too large a time step causes "
+            "instability; missing hold-up volumes make the model stiff; always confirm "
+            "the steady state is the expected operating point before going dynamic."
+        ),
+        "tags": ["dynamic simulation", "transient", "DWSIM dynamic mode", "integrator",
+                 "pressure-flow network", "hold-up", "PID control", "start-up",
+                 "disturbance", "control", "process dynamics"],
+        "source": "DWSIM Dynamic Simulation Tutorial (dwsim.org/wiki); Seborg et al., Process Dynamics & Control",
+    },
+    {
+        "id": "cmp_sulfuric_acid",
+        "title": "Sulfuric Acid (H2SO4) — Properties & Contact Process",
+        "text": (
+            "Sulfuric acid (H2SO4, MW 98.08) is the world's most-produced industrial "
+            "chemical. Pure: density ~1.84 g/cm^3 (98 %), normal boiling point ~337 °C "
+            "(decomposes), melting point 10 °C; strongly hygroscopic and a powerful "
+            "dehydrating agent; mixing with water is highly exothermic (always add acid "
+            "to water). It is a non-volatile strong diprotic acid. "
+            "Production — the CONTACT PROCESS: (1) burn sulfur (or roast sulfide ores) "
+            "to SO2: S + O2 → SO2. (2) Catalytic oxidation SO2 + ½O2 ⇌ SO3 over V2O5 at "
+            "~420–600 °C in a multi-bed adiabatic converter with inter-stage cooling — "
+            "the reaction is exothermic and equilibrium-limited, so double-absorption "
+            "('double contact') raises conversion to > 99.7 %. (3) Absorb SO3 into "
+            "98 % sulfuric acid (NOT water — water would form an acid mist) in an "
+            "absorption tower: SO3 + H2O → H2SO4. "
+            "Modelling in DWSIM: SO2 oxidation is well-suited to a Gibbs or "
+            "equilibrium reactor; the strongly non-ideal concentrated-acid absorption "
+            "needs an electrolyte/activity property package, so treat the absorber "
+            "carefully. Major uses: fertilisers (phosphoric acid), ore leaching, "
+            "alkylation, sulfonation, batteries."
+        ),
+        "tags": ["sulfuric acid", "H2SO4", "contact process", "SO2 oxidation", "SO3",
+                 "V2O5 catalyst", "double absorption", "compound properties",
+                 "inorganic chemical", "strong acid"],
+        "source": "Perry's 9th ed.; Austin, Shreve's Chemical Process Industries",
+    },
+    {
+        "id": "cmp_sodium_hydroxide",
+        "title": "Sodium Hydroxide (NaOH, Caustic Soda) — Properties & Chlor-Alkali",
+        "text": (
+            "Sodium hydroxide (NaOH, MW 40.0), caustic soda, is a strong base sold as "
+            "solid flakes/pearls or as 50 % and 32 % aqueous solutions. Solid: melting "
+            "point 318 °C, boiling point 1388 °C, density ~2.13 g/cm^3; highly "
+            "hygroscopic; dissolution in water is strongly exothermic. A 50 % solution "
+            "has density ~1.52 g/cm^3 and must be kept above ~12 °C to avoid "
+            "crystallisation. Strongly corrosive to skin, aluminium and glass. "
+            "Production — the CHLOR-ALKALI process: electrolysis of brine (NaCl "
+            "solution) co-produces NaOH, chlorine and hydrogen: "
+            "2 NaCl + 2 H2O → 2 NaOH + Cl2 + H2. Three cell technologies: mercury "
+            "(legacy, phased out), diaphragm, and the modern MEMBRANE cell (ion-"
+            "exchange membrane, lowest energy, highest-purity caustic). The membrane "
+            "passes Na+ to the cathode where NaOH forms, while Cl2 evolves at the "
+            "anode. "
+            "Modelling: the electrolysis itself is electrochemical (not a standard "
+            "DWSIM reactor); downstream caustic evaporation/concentration and brine "
+            "handling are amenable to simulation with an electrolyte package. Major "
+            "uses: pulp & paper, alumina (Bayer), soaps, water treatment, CO2 "
+            "scrubbing, biodiesel transesterification catalyst."
+        ),
+        "tags": ["sodium hydroxide", "NaOH", "caustic soda", "chlor-alkali",
+                 "membrane cell", "brine electrolysis", "strong base", "compound properties",
+                 "inorganic chemical"],
+        "source": "Perry's 9th ed.; Austin, Shreve's Chemical Process Industries",
+    },
+    {
+        "id": "cmp_propylene",
+        "title": "Propylene (Propene, C3H6) — Properties & Production",
+        "text": (
+            "Propylene (propene, C3H6, MW 42.08) is, after ethylene, the second-"
+            "largest petrochemical building block. Critical properties: Tc = 364.9 K "
+            "(91.8 °C), Pc = 46.0 bar, ω = 0.142, normal boiling point −47.6 °C. It is "
+            "a colourless flammable gas, lighter-than-air liquefies under modest "
+            "pressure. Recommended EOS: Peng-Robinson or SRK (light hydrocarbon, "
+            "non-polar) — accurate for VLE and the propylene/propane split. "
+            "Antoine (log10 P[bar], T[K], approx): use PR/SRK in DWSIM rather than "
+            "Antoine for the supercritical/high-pressure ranges typical of olefin "
+            "plants. "
+            "Production: mainly as a co-product of ethylene STEAM CRACKING of naphtha/"
+            "LPG, from refinery FCC off-gas, and increasingly by on-purpose routes — "
+            "propane dehydrogenation (PDH) and metathesis. A classic hard separation is "
+            "propylene/propane (a 'C3 splitter'): close-boiling (relative volatility "
+            "≈ 1.1), needing ~150–200 trays and high reflux — a textbook case for "
+            "rigorous distillation and energy optimisation in DWSIM. Major uses: "
+            "polypropylene, acrylonitrile, propylene oxide, cumene, acrylic acid."
+        ),
+        "tags": ["propylene", "propene", "C3H6", "olefin", "steam cracking",
+                 "propane dehydrogenation", "C3 splitter", "Peng-Robinson",
+                 "compound properties", "petrochemical"],
+        "source": "DIPPR 801; Perry's 9th ed.; NIST WebBook",
+    },
+
     # ══════════════════════════════════════════════════════════
     # COMPOUND THERMODYNAMIC PROPERTIES
     # Source: DIPPR 801 (2023), Perry's 9th ed., NIST WebBook
@@ -4437,6 +4879,261 @@ KNOWLEDGE_CHUNKS: List[Dict] = [
                   "DWSIM Plugins documentation (Reaktoro)",
     },
 
+    # ── H2 Production — SMR Kinetics and Thermodynamics ──────────────────────
+
+    {
+        "id": "h2_smr_reactions",
+        "title": "Steam Methane Reforming (SMR) Reactions and Thermodynamics",
+        "text": (
+            "Steam Methane Reforming (SMR) involves three key equilibrium reactions:\n\n"
+            "PRIMARY SMR:   CH4 + H2O ⇌ CO + 3H2     ΔH°298 = +206 kJ/mol  (endothermic)\n"
+            "DRY REFORMING: CH4 + CO2 ⇌ 2CO + 2H2    ΔH°298 = +247 kJ/mol  (strongly endothermic)\n"
+            "WATER-GAS SHIFT (WGS): CO + H2O ⇌ CO2 + H2  ΔH°298 = -41 kJ/mol (exothermic)\n\n"
+            "TEMPERATURE EFFECTS:\n"
+            "  Higher temperature (>800°C) strongly favors H2 production (Le Chatelier).\n"
+            "  Typical industrial reformer: 800-950°C, 15-30 bar.\n"
+            "  At 900°C, 16 bar, S/C=2.5: CH4 conversion ~97-99%.\n"
+            "  Equilibrium constants: Kp_SMR = 5.2 atm2 at 900°C, 2610 atm2 at 1000°C.\n\n"
+            "PRESSURE EFFECTS:\n"
+            "  SMR is volume-increasing (1 mol → 4 mol). Higher pressure suppresses H2 yield.\n"
+            "  Industrial compromise: 16-30 bar to enable downstream PSA and reduce equipment size.\n"
+            "  Le Chatelier: reduce pressure → more H2 (but increases compression costs).\n\n"
+            "STEAM-TO-CARBON RATIO (S/C):\n"
+            "  Minimum S/C ≥ 1.5 to prevent carbon deposition (Boudouard reaction).\n"
+            "  Industrial standard: S/C = 2.5-3.5 for biogas reforming.\n"
+            "  Higher S/C increases H2 yield and CH4 conversion but raises utility costs.\n"
+            "  Optimal S/C = 2.5 for biogas SMR (Ullah et al. 2025).\n\n"
+            "CATALYST:\n"
+            "  Industrial: Ni/Al2O3 catalyst, active at >400°C.\n"
+            "  Deactivation by: sulfur poisoning (S<0.1 ppm required), carbon deposition.\n"
+            "  In DWSIM: model as GibbsReactor (auto equilibrium) or EquilibriumReactor.\n"
+            "  GibbsReactor is preferred — no stoichiometry/Kp configuration needed.\n\n"
+            "DWSIM IMPLEMENTATION:\n"
+            "  Use GibbsReactor at T=909°C, P=16 bar for reforming step.\n"
+            "  Compounds: Methane, Water, Hydrogen, Carbon monoxide, Carbon dioxide, Nitrogen.\n"
+            "  Property package: Peng-Robinson (PR) — handles non-polar gas mixtures well.\n"
+            "  For biogas (60% CH4 + 40% CO2), both SMR and dry reforming occur simultaneously."
+        ),
+        "tags": ["SMR", "steam methane reforming", "hydrogen production", "biogas",
+                 "reforming", "Gibbs reactor", "equilibrium", "WGS", "water gas shift",
+                 "dry reforming", "CO2 reforming", "CH4 conversion", "steam to carbon",
+                 "endothermic", "Peng-Robinson", "Ullah 2025"],
+        "source": "Rostrup-Nielsen (2002) Catalysis Today 71:243; "
+                  "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "Fogler, Elements of CRE, 5th ed., Ch. 10",
+    },
+
+    {
+        "id": "h2_wgs_reaction",
+        "title": "Water-Gas Shift (WGS) Reaction — HTS and LTS Stages",
+        "text": (
+            "The Water-Gas Shift reaction removes CO and produces additional H2:\n"
+            "  CO + H2O ⇌ CO2 + H2     ΔH°298 = -41.2 kJ/mol  (exothermic)\n\n"
+            "INDUSTRIAL WGS STAGES:\n"
+            "  1. HIGH-TEMPERATURE SHIFT (HTS): 300-450°C, Fe-Cr catalyst\n"
+            "     - Fast kinetics, CO conversion ~70-85% per pass\n"
+            "     - Inlet T ≈ 350°C (after cooling reformer outlet from ~900°C)\n"
+            "     - Outlet T ≈ 420-450°C (exothermic rise ~80°C)\n"
+            "  2. LOW-TEMPERATURE SHIFT (LTS): 200-260°C, Cu-Zn catalyst\n"
+            "     - Near-equilibrium operation, CO conversion ~80-95% per pass\n"
+            "     - Inlet T ≈ 200-210°C (after intercooling from HTS)\n"
+            "     - Outlet T ≈ 240-260°C\n"
+            "     - After LTS: CO < 0.5 mol% (cleaned up to <10 ppm by methanation)\n\n"
+            "EQUILIBRIUM CONSTANT:\n"
+            "  Kp_WGS = exp(ΔG/RT). At 350°C: Kp ≈ 35; at 450°C: Kp ≈ 12; at 250°C: Kp ≈ 85.\n"
+            "  Lower T gives better equilibrium conversion but slower kinetics.\n\n"
+            "DWSIM IMPLEMENTATION:\n"
+            "  Model as ConversionReactor with conversion 0.75 (HTS) and 0.85 (LTS).\n"
+            "  Alternatively: EquilibriumReactor for rigorous Kp-based calculation.\n"
+            "  Reaction stoichiometry: {CO: -1, H2O: -1, CO2: +1, H2: +1}\n"
+            "  Base compound: Carbon monoxide.\n"
+            "  Always cool the reformer outlet to ~350°C (HRE-1) before HTS.\n"
+            "  Cool HTS outlet to ~210°C (HRE-2) before LTS.\n\n"
+            "COMBINED WGS PERFORMANCE (Ullah 2025 base case):\n"
+            "  CO at reformer outlet (REF-P): ~22 mol%\n"
+            "  CO after HTS (HTS-P): ~7 mol% (75% conversion)\n"
+            "  CO after LTS (LTS-P): ~1 mol% (85% conversion in LTS)\n"
+            "  Overall CO conversion via two-stage WGS: ~95%"
+        ),
+        "tags": ["WGS", "water gas shift", "HTS", "LTS", "high temperature shift",
+                 "low temperature shift", "CO conversion", "hydrogen production",
+                 "ConversionReactor", "EquilibriumReactor", "Fe-Cr catalyst",
+                 "Cu-Zn catalyst", "exothermic", "intercooling"],
+        "source": "Newsome (1980) Catal. Rev. 21:275; "
+                  "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "Smith, Van Ness & Abbott, 7th ed., Ex. 13.7",
+    },
+
+    {
+        "id": "h2_psa_purification",
+        "title": "PSA Hydrogen Purification — Pressure Swing Adsorption",
+        "text": (
+            "Pressure Swing Adsorption (PSA) is the dominant industrial method for producing\n"
+            "high-purity hydrogen (>99.9%) from reformer gas.\n\n"
+            "PSA OPERATING PRINCIPLE:\n"
+            "  1. ADSORPTION (high pressure, ~15-30 bar): CO2, CO, CH4, H2O adsorbed\n"
+            "     on zeolite/activated carbon beds. H2 passes through (weakly adsorbed).\n"
+            "  2. REGENERATION (low pressure, ~1-2 bar): beds regenerated by depressurization.\n"
+            "     Off-gas (tail gas) = CO2 + CO + CH4 + some H2 — burned as fuel.\n\n"
+            "TYPICAL PSA PERFORMANCE:\n"
+            "  H2 purity: 99.9-99.999% (6 nines possible with large bed sets)\n"
+            "  H2 recovery: 70-90% (typically 75-85% for standard 10-bed units)\n"
+            "  Tail gas LHV: ~5-8 MJ/kg (used to fire the reformer furnace)\n"
+            "  Feed conditions: T < 40°C (condenser required upstream), P = 15-30 bar\n\n"
+            "CONDENSER UPSTREAM OF PSA:\n"
+            "  Essential — must remove water to <200 ppm before PSA to protect beds.\n"
+            "  Cool to 38-40°C at process pressure (15+ bar) to knock out liquid water.\n"
+            "  CONDENSATE stream leaves the flash drum (vessel/separator in DWSIM).\n\n"
+            "DWSIM IMPLEMENTATION:\n"
+            "  Model PSA as CompoundSeparator with:\n"
+            "    - separation={\"Hydrogen\": 0.79}  (79% H2 recovery; rest to tail gas)\n"
+            "    - CO2, CO, CH4, H2O split to tail gas (separation factor ≈ 0.02)\n"
+            "  For higher fidelity: specify individual compound recoveries.\n"
+            "  PSA is inherently a cyclic unsteady process — DWSIM uses a steady-state surrogate.\n\n"
+            "TAIL GAS UTILIZATION:\n"
+            "  Ullah 2025: tail gas depressurized to ~1 bar via valve, mixed with air,\n"
+            "  combusted in a conversion reactor (99% conversion), flue gas cools via HRE-4.\n"
+            "  This provides heat integration — furnace fuel = PSA tail gas."
+        ),
+        "tags": ["PSA", "pressure swing adsorption", "hydrogen purification", "H2 purity",
+                 "CompoundSeparator", "tail gas", "condenser", "zeolite",
+                 "hydrogen recovery", "adsorption", "regeneration", "fuel cell grade H2"],
+        "source": "Yang (1997) Gas Separation by Adsorption Processes, Ch. 5; "
+                  "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "IEA Hydrogen Report (2019)",
+    },
+
+    {
+        "id": "h2_biogas_composition",
+        "title": "Biogas Composition and Pre-treatment for Reforming",
+        "text": (
+            "Biogas from anaerobic digestion (AD) or landfill gas is a viable feedstock\n"
+            "for hydrogen production via SMR. Key properties:\n\n"
+            "TYPICAL BIOGAS COMPOSITION (Ullah 2025 / standard AD):\n"
+            "  CH4: 55-70 mol%  (Ullah 2025 base case: 59.97 mol%)\n"
+            "  CO2: 28-45 mol%  (Ullah 2025: 40.06 mol%)\n"
+            "  N2:  0-2%  H2S: 100-3000 ppm  H2O: saturated  Siloxanes: traces\n\n"
+            "FEED PREPROCESSING REQUIRED:\n"
+            "  1. H2S REMOVAL: Required to <0.1 ppm before Ni catalyst.\n"
+            "     Methods: ZnO guard bed, amine scrubbing (MDEA), activated carbon.\n"
+            "  2. WATER REMOVAL: Cool/dehydrate to prevent condensation in compressor.\n"
+            "  3. COMPRESSION: Typically 1 bar → 16 bar (adiabatic efficiency ~75%).\n"
+            "     Biogas compressor outlet T: ~185°C (adiabatic), then cooled.\n"
+            "  4. STEAM GENERATION: Water (46 kg/h per 38.5 kg/h biogas) heated to\n"
+            "     220°C at 16 bar, then superheated for mixing.\n\n"
+            "CO2 IN BIOGAS — DUAL EFFECT:\n"
+            "  CO2 in the biogas feed participates in dry reforming (CH4 + CO2 → 2CO + 2H2),\n"
+            "  which occurs simultaneously with steam reforming at >700°C.\n"
+            "  Net effect: CO2-rich biogas produces more CO (needs more WGS stage conversion).\n"
+            "  Gibbs minimization automatically captures both reactions in DWSIM.\n\n"
+            "STREAM SETUP FOR DWSIM (base case from Ullah 2025):\n"
+            "  BIOGAS-IN: mass_flow=38.5 kg/h, T=25°C, P=1 bar\n"
+            "    Compositions: CH4=0.5997, CO2=0.4006, N2=0.0002, O2=0.0004\n"
+            "  WATER-IN: mass_flow=46 kg/h, T=25°C, P=1 bar, pure water\n"
+            "  Both compressed/heated to 16 bar before mixing for reforming.\n"
+            "  COMP-101: adiabatic_efficiency=0.75, P_out=16 bar\n"
+            "  P-101 (pump): adiabatic_efficiency=0.75, P_out=16 bar"
+        ),
+        "tags": ["biogas", "anaerobic digestion", "landfill gas", "biogas composition",
+                 "CH4 CO2", "H2S removal", "dry reforming", "biogas SMR",
+                 "preprocessing", "compressor", "steam generation",
+                 "Ullah 2025", "mass flow", "feed conditions"],
+        "source": "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "Ryckebosch et al. (2011) Biomass & Bioenergy 35:1633; "
+                  "IEA Bioenergy (2020) Biogas Upgrading Report",
+    },
+
+    {
+        "id": "h2_process_optimization_rsmwgs",
+        "title": "H2 Production Process Optimization — RSM and Key Variables",
+        "text": (
+            "Response Surface Methodology (RSM) optimization of biogas SMR hydrogen production\n"
+            "(Ullah et al. 2025, DWSIM + Python RSM integration):\n\n"
+            "DECISION VARIABLES AND OPTIMAL VALUES:\n"
+            "  T_reformer:  750-950°C  → optimum 909°C  (highest H2 yield)\n"
+            "  P_system:    8-20 bar   → optimum 16 bar  (balance compression/H2 yield)\n"
+            "  S/C ratio:   1.5-3.5    → optimum 2.5     (balance yield/utility cost)\n\n"
+            "KEY PERFORMANCE INDICATORS (base case, Ullah 2025):\n"
+            "  H2 production:    10.8 kg/h  from 38.5 kg/h biogas feed\n"
+            "  H2 yield:         3.45 mol H2 / mol CH4  (86.3% of theoretical 4.0)\n"
+            "  CH4 conversion:   97.8%\n"
+            "  CO2 conversion:   95.2%  (both SMR + dry reforming)\n"
+            "  PSA H2 recovery:  79%  →  H2 purity 99.9%\n"
+            "  Reformer efficiency: 72.4%\n\n"
+            "TEMPERATURE SENSITIVITY (at P=16 bar, S/C=2.5):\n"
+            "  At 750°C: 7.2 kg/h H2  (CH4 conv 85%)  ← equilibrium-limited\n"
+            "  At 850°C: 9.9 kg/h H2  (CH4 conv 96%)\n"
+            "  At 909°C: 10.8 kg/h H2 (CH4 conv 98%)  ← optimum\n"
+            "  At 950°C: 10.9 kg/h H2 (marginal gain vs. energy cost)\n\n"
+            "PRESSURE SENSITIVITY (at T=909°C, S/C=2.5):\n"
+            "  At 8 bar:  11.2 kg/h H2  (lower P favors SMR, but large equipment)\n"
+            "  At 16 bar: 10.8 kg/h H2  (industrial compromise)\n"
+            "  At 20 bar: 10.4 kg/h H2  (P suppresses equilibrium)\n\n"
+            "OPTIMIZATION TOOLS IN DWSIM AGENT:\n"
+            "  1. parametric_study: vary T_ref or S/C ratio over a range, plot H2 yield\n"
+            "  2. parametric_study_2d: T_ref × S/C → H2 yield (RSM response surface)\n"
+            "  3. bayesian_optimize: find optimal (T, P, S/C) in ~25 simulations\n"
+            "  4. compare_to_literature: compare results vs. Ullah 2025 after solving\n\n"
+            "HOW TO REPRODUCE THE ULLAH 2025 RESULT IN DWSIM AGENT:\n"
+            "  1. build_flowsheet_atomic or create_from_template 'biogas_smr_h2_gibbs'\n"
+            "  2. save_and_solve or robust_solve\n"
+            "  3. compare_to_literature {process: 'biogas_smr_h2', tolerance_pct: 5}\n"
+            "  4. parametric_study_2d to reproduce the RSM surface from the paper"
+        ),
+        "tags": ["RSM", "response surface methodology", "biogas SMR optimization",
+                 "H2 yield", "CH4 conversion", "CO2 conversion", "parametric study",
+                 "Ullah 2025", "temperature sensitivity", "pressure sensitivity",
+                 "steam to carbon ratio", "bayesian optimization", "compare_to_literature",
+                 "biogas_smr_h2_gibbs", "10.8 kg/h hydrogen"],
+        "source": "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "Seider, Seader & Lewin, Product & Process Design, 4th ed.",
+    },
+
+    {
+        "id": "h2_flowsheet_convergence",
+        "title": "Complex Reactive Flowsheet Convergence — SMR / WGS / PSA Train",
+        "text": (
+            "Biogas-to-H2 flowsheets are among the most convergence-challenging in DWSIM:\n"
+            "multiple reactors, intercoolers, phase separation, and a PSA surrogate.\n\n"
+            "RECOMMENDED SOLVE SEQUENCE:\n"
+            "  1. Use build_flowsheet_atomic or biogas_smr_h2_gibbs template.\n"
+            "  2. Call robust_solve {strategy: 'robust'} — NOT save_and_solve directly.\n"
+            "     robust_solve retries up to 3 times with reload+reinit if needed.\n"
+            "  3. If robust_solve fails: check HRE (heat recovery) cooler outlet temperatures.\n"
+            "     HRE-1 must cool REF-P to ≤350°C before HTS inlet.\n"
+            "     HRE-2 must cool HTS-P to ≤210°C before LTS inlet.\n"
+            "  4. After convergence: call compare_to_literature to validate vs. Ullah 2025.\n\n"
+            "COMMON FAILURE MODES:\n"
+            "  A. CONDENSER flash fails: COND-101 (Vessel) at 38°C — must have\n"
+            "     both vapor (PSA-F) and liquid (CONDENSATE) outlet streams connected.\n"
+            "  B. CompoundSeparator (PSA-101) fails: need TWO outlet streams (HYDROGEN + TAIL-GAS)\n"
+            "     and correct separation dict {\"Hydrogen\": 0.79}.\n"
+            "  C. Combustor (COMB-101) fails: ConversionReactor for tail gas combustion.\n"
+            "     Needs 3 reactions: CH4 + 2O2 → CO2 + 2H2O, CO + 0.5O2 → CO2, H2 + 0.5O2 → H2O.\n"
+            "  D. GibbsReactor (REF-101) fails: check that all 6 compounds are in the compound\n"
+            "     list AND that feed temperature is ≥700°C (below this, equilibrium barely shifts).\n"
+            "  E. Composition issues: mole fractions of all compounds in BIOGAS-IN and WATER-IN\n"
+            "     must sum to exactly 1.0. Always use set_stream_composition.\n\n"
+            "ENERGY BALANCE CHECK:\n"
+            "  After solve, check energy streams: Q-REF should be large positive (furnace heat).\n"
+            "  Q-HRE1/2/3/4 should be negative (cooling). Q-COMP/PUMP should be positive (work in).\n"
+            "  If Q-REF is negative, the reformer T spec is wrong — check REF-101 outlet T setting.\n\n"
+            "TOPOLOGY NOTES (Ullah 2025 flowsheet):\n"
+            "  13 unit ops: COMP-101, H-101, P-101, B-101, MIX-101, REF-101 (Gibbs),\n"
+            "               HRE-1, HTS-101, HRE-2, LTS-101, HRE-3, COND-101, PSA-101\n"
+            "  + tail-gas loop: VLV-101, MIX-102, PRE-HEAT, COMB-101, HRE-4\n"
+            "  Total 18 unit ops, ~30 streams. Use build_flowsheet_atomic for reliability."
+        ),
+        "tags": ["SMR convergence", "WGS", "PSA", "biogas H2 flowsheet",
+                 "robust_solve", "convergence failure", "GibbsReactor",
+                 "CompoundSeparator", "ConversionReactor", "condenser",
+                 "compare_to_literature", "build_flowsheet_atomic",
+                 "COND-101", "PSA-101", "HTS-101", "LTS-101", "REF-101",
+                 "energy balance", "topology", "flowsheet building"],
+        "source": "Ullah et al. (2025) Digit. Chem. Eng. 14:100205; "
+                  "DWSIM documentation; Perry's 9th ed., Sec. 27",
+    },
+
 ]
 
 
@@ -4457,21 +5154,52 @@ class KnowledgeBase:
     """
 
     def __init__(self):
-        self.chunks = KNOWLEDGE_CHUNKS
+        self.chunks = self._validate_chunks(KNOWLEDGE_CHUNKS)
         self._idf: Dict[str, float] = {}
         self._doc_tfs: List[Counter] = []
         self._doc_lens: List[int] = []
         self._avg_dl: float = 0.0
-        self._build_index()
-
-        # ── Optional: semantic search via sentence-transformers ───────────────
-        # Not enabled by default — TF-IDF is sufficient for this project's
-        # domain-specific vocabulary and the LLM compensates for any misses.
-        # To enable: pip install sentence-transformers  (pulls in PyTorch ~500MB)
+        # Optional semantic search (disabled by default — see _embed below).
+        # TF-IDF/BM25 is sufficient for this project's domain vocabulary.
         self._smodel   = None
         self._semb     = None
         self._use_sem  = False
         self._sem_lock = __import__('threading').Lock()
+        self._build_index()
+
+    @staticmethod
+    def _validate_chunks(raw_chunks: List[Dict]) -> List[Dict]:
+        """Drop malformed chunks at load time; log warnings for skipped entries."""
+        import logging as _logging
+        _log = _logging.getLogger("knowledge_base")
+        REQUIRED = ("id", "title", "text")
+        valid, dropped = [], []
+        seen_ids = set()
+        for i, c in enumerate(raw_chunks):
+            if not isinstance(c, dict):
+                dropped.append((i, "not_a_dict"))
+                continue
+            missing = [k for k in REQUIRED if not c.get(k)]
+            if missing:
+                dropped.append((i, f"missing:{','.join(missing)}"))
+                continue
+            cid = c["id"]
+            if cid in seen_ids:
+                dropped.append((i, f"duplicate_id:{cid}"))
+                continue
+            text = c["text"]
+            if not isinstance(text, str) or len(text) < 5:
+                dropped.append((i, f"text_too_short:{len(text) if isinstance(text,str) else 0}"))
+                continue
+            # Scrub control chars except \n\r\t
+            cleaned = "".join(ch for ch in text if ch == "\n" or ch == "\r" or ch == "\t" or ord(ch) >= 32)
+            if cleaned != text:
+                c = {**c, "text": cleaned}
+            seen_ids.add(cid)
+            valid.append(c)
+        if dropped:
+            _log.warning("KnowledgeBase: dropped %d malformed chunks: %s", len(dropped), dropped[:5])
+        return valid
 
     # ── Embedding cache ───────────────────────────────────────────────────────
     # Embeddings are expensive to compute (~50 s for 109 chunks on first run).

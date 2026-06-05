@@ -125,6 +125,7 @@ class SafetyValidator:
         failures += self._check_composition_sum(stream_results)
         failures += self._check_negative_flow(stream_results)
         failures += self._check_hx_energy_balance(stream_results, topology, unit_op_duties)
+        failures += self._check_element_balance(stream_results, topology)
         return failures
 
     def check_global_balance(
@@ -1284,6 +1285,144 @@ class SafetyValidator:
                               f"dH_streams={stream_delta_kw:.1f} kW, "
                               f"method={method}"),
                     stream_tag=uo_tag,
+                ))
+        return out
+
+    # ── SF-14: Element balance check ──────────────────────────────────────────
+    # Compound atomic formulas for the most common process-simulation chemicals.
+    # Catches reaction stoichiometry typos in ConversionReactor that mass balance
+    # misses (atoms can be swapped between compounds while mass stays closed).
+    _ATOM_DB: Dict[str, Dict[str, int]] = {
+        # Inorganics / gases
+        "water":           {"H": 2, "O": 1},
+        "hydrogen":        {"H": 2},
+        "oxygen":          {"O": 2},
+        "nitrogen":        {"N": 2},
+        "carbon monoxide": {"C": 1, "O": 1},
+        "carbon dioxide":  {"C": 1, "O": 2},
+        "methane":         {"C": 1, "H": 4},
+        "ammonia":         {"N": 1, "H": 3},
+        "hydrogen sulfide":{"H": 2, "S": 1},
+        "sulfur dioxide":  {"S": 1, "O": 2},
+        "chlorine":        {"Cl": 2},
+        "hydrogen chloride":{"H": 1, "Cl": 1},
+        # C1-C4 hydrocarbons
+        "ethane":          {"C": 2, "H": 6},
+        "propane":         {"C": 3, "H": 8},
+        "n-butane":        {"C": 4, "H": 10},
+        "isobutane":       {"C": 4, "H": 10},
+        "ethylene":        {"C": 2, "H": 4},
+        "propylene":       {"C": 3, "H": 6},
+        "acetylene":       {"C": 2, "H": 2},
+        # Alcohols / oxygenates
+        "methanol":        {"C": 1, "H": 4, "O": 1},
+        "ethanol":         {"C": 2, "H": 6, "O": 1},
+        "propanol":        {"C": 3, "H": 8, "O": 1},
+        "1-propanol":      {"C": 3, "H": 8, "O": 1},
+        "2-propanol":      {"C": 3, "H": 8, "O": 1},
+        "glycol":          {"C": 2, "H": 6, "O": 2},
+        "ethylene glycol": {"C": 2, "H": 6, "O": 2},
+        "acetone":         {"C": 3, "H": 6, "O": 1},
+        "acetic acid":     {"C": 2, "H": 4, "O": 2},
+        "formaldehyde":    {"C": 1, "H": 2, "O": 1},
+        # Aromatics
+        "benzene":         {"C": 6, "H": 6},
+        "toluene":         {"C": 7, "H": 8},
+        "xylene":          {"C": 8, "H": 10},
+        "styrene":         {"C": 8, "H": 8},
+        # Nitrogen compounds
+        "urea":            {"C": 1, "H": 4, "N": 2, "O": 1},
+        "amine":           {"N": 1, "H": 3},
+        "mea":             {"C": 2, "H": 7, "N": 1, "O": 1},
+        "monoethanolamine":{"C": 2, "H": 7, "N": 1, "O": 1},
+    }
+
+    @classmethod
+    def _atoms_for_compound(cls, name: str) -> Optional[Dict[str, int]]:
+        """Return element count dict for a compound name (case-insensitive)."""
+        return cls._ATOM_DB.get(name.lower().strip())
+
+    def _check_element_balance(
+        self,
+        streams:  Dict[str, Dict[str, Any]],
+        topology: Optional[Dict[str, Any]],
+    ) -> List[ValidationFailure]:
+        """
+        SF-14: Element balance check across the entire flowsheet boundary.
+
+        Computes atom-mol totals for feed streams (no upstream unit op) and
+        product streams (no downstream unit op).  If a element closes to < 95%,
+        a reaction stoichiometry typo is very likely.  Only runs when compound
+        formulas are available from _ATOM_DB; silently skips unknown compounds.
+
+        This check catches the most common LLM mistake: wrong stoichiometric
+        coefficients in ConversionReactor that keep mass closed while swapping
+        atoms between compounds (e.g. C and N exchanged in urea synthesis).
+        """
+        out: List[ValidationFailure] = []
+        if not topology or not streams:
+            return out
+
+        connections  = topology.get("connections", [])
+        unit_op_tags = {
+            u.get("tag", "") if isinstance(u, dict) else u
+            for u in topology.get("unit_ops", [])
+        } - {""}
+
+        # Identify feed streams (not a destination of any connection)
+        dst_tags = {c.get("to") or c.get("to_tag", "") for c in connections}
+        feed_tags    = [t for t in streams if t not in dst_tags]
+
+        # Identify product streams (not a source of any connection)
+        src_tags = {c.get("from") or c.get("from_tag", "") for c in connections}
+        product_tags = [t for t in streams if t not in src_tags]
+
+        if not feed_tags or not product_tags:
+            return out  # can't determine boundary — skip
+
+        def _atom_totals(tag_list: List[str]) -> Dict[str, float]:
+            totals: Dict[str, float] = {}
+            for tag in tag_list:
+                s = streams.get(tag, {})
+                n = s.get("molar_flow_mol_s") or s.get("molarflow_mol_s") or 0.0
+                if n <= 0:
+                    continue
+                fracs = s.get("mole_fractions") or s.get("composition") or {}
+                for compound, xi in fracs.items():
+                    atoms = self._atoms_for_compound(compound)
+                    if atoms is None:
+                        continue
+                    for element, count in atoms.items():
+                        totals[element] = totals.get(element, 0.0) + n * float(xi) * count
+            return totals
+
+        feed_atoms    = _atom_totals(feed_tags)
+        product_atoms = _atom_totals(product_tags)
+
+        for element, in_mol in feed_atoms.items():
+            if in_mol < 1e-10:
+                continue
+            out_mol  = product_atoms.get(element, 0.0)
+            closure  = 100.0 * out_mol / in_mol
+            if closure < 95.0:
+                severity = "ERROR" if closure < 85.0 else "WARNING"
+                out.append(ValidationFailure(
+                    code="SF-14", severity=severity,
+                    description=(
+                        f"SF-14: Element balance for {element} closes at "
+                        f"{closure:.1f}% (feed={in_mol:.4g} mol/s, "
+                        f"product={out_mol:.4g} mol/s). "
+                        "Most likely cause: wrong stoichiometric coefficient in a "
+                        "ConversionReactor reaction definition. "
+                        "FIX: check that reaction stoichiometry conserves {element} "
+                        "atoms (e.g. N2 + 3H2 → 2NH3 conserves N: 2 atoms in, "
+                        "2 atoms out per mole of Ammonia)."
+                    ),
+                    evidence=(
+                        f"{element}: feed={in_mol:.4g} mol·atom/s, "
+                        f"product={out_mol:.4g} mol·atom/s, "
+                        f"closure={closure:.1f}%"
+                    ),
                 ))
         return out
 

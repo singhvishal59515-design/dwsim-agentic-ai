@@ -21,6 +21,7 @@ All improvements from v1 are retained:
 import io
 import os
 import sys
+import threading
 import time
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
@@ -552,22 +553,52 @@ def _reflect_set_typed(tp, obj, value) -> bool:
     return False
 
 
+_EXPECTED_UNITS = {
+    "temperature": "K, C, or F",
+    "pressure":    "Pa, bar, kPa, atm, psi, MPa, or mmHg",
+    "molar_flow":  "mol/s, mol/h, kmol/h, or mol/min",
+    "mass_flow":   "kg/s, kg/h, t/h, or lb/h",
+    "vapor_fraction": "- (dimensionless)",
+}
+
 def _convert_to_si(prop: str, value: float,
                    unit: str) -> Tuple[float, str, Optional[str]]:
     p = prop.lower().replace(" ", "_").replace("-", "_")
-    u = unit.lower().strip()
+    u = (unit or "").lower().strip()
+
+    def _need_unit(key: str):
+        if not u:
+            raise ValueError(
+                f"Property '{prop}' requires an explicit unit "
+                f"(expected one of: {_EXPECTED_UNITS[key]}). "
+                "Empty unit string silently caused wrong SI conversion in the past."
+            )
+
     if "temp" in p:
-        return (value + 273.15 if u == "c" else value), "K", "Temperature"
+        _need_unit("temperature")
+        if u in ("k",): return value, "K", "Temperature"
+        if u in ("c", "°c"): return value + 273.15, "K", "Temperature"
+        if u in ("f", "°f"): return (value - 32) * 5/9 + 273.15, "K", "Temperature"
+        raise ValueError(f"Unknown temperature unit '{unit}' (expected K, C, or F)")
     if "press" in p:
-        conv = {"bar": 1e5, "kpa": 1e3, "atm": 101325.0,
+        _need_unit("pressure")
+        conv = {"pa": 1.0, "bar": 1e5, "kpa": 1e3, "atm": 101325.0,
                 "psi": 6894.757, "mpa": 1e6, "mmhg": 133.322}
-        return value * conv.get(u, 1.0), "Pa", "Pressure"
+        if u not in conv:
+            raise ValueError(f"Unknown pressure unit '{unit}' (expected: {_EXPECTED_UNITS['pressure']})")
+        return value * conv[u], "Pa", "Pressure"
     if "molar" in p or "mole_flow" in p:
-        conv = {"mol/h": 1/3600, "kmol/h": 1000/3600, "mol/min": 1/60}
-        return value * conv.get(u, 1.0), "mol/s", "MolarFlow"
+        _need_unit("molar_flow")
+        conv = {"mol/s": 1.0, "mol/h": 1/3600, "kmol/h": 1000/3600, "mol/min": 1/60}
+        if u not in conv:
+            raise ValueError(f"Unknown molar-flow unit '{unit}' (expected: {_EXPECTED_UNITS['molar_flow']})")
+        return value * conv[u], "mol/s", "MolarFlow"
     if "mass" in p and "flow" in p:
-        conv = {"kg/h": 1/3600, "t/h": 1000/3600, "lb/h": 0.000125998}
-        return value * conv.get(u, 1.0), "kg/s", "MassFlow"
+        _need_unit("mass_flow")
+        conv = {"kg/s": 1.0, "kg/h": 1/3600, "t/h": 1000/3600, "lb/h": 0.000125998}
+        if u not in conv:
+            raise ValueError(f"Unknown mass-flow unit '{unit}' (expected: {_EXPECTED_UNITS['mass_flow']})")
+        return value * conv[u], "kg/s", "MassFlow"
     if "vapor" in p or "quality" in p or "vf" in p:
         return float(value), "-", "VaporFraction"
     return value, unit, None
@@ -810,6 +841,48 @@ def _get_unit_op_summary(obj) -> Dict[str, Any]:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+# DWSIM's Automation manager is a PROCESS-LEVEL singleton: constructing a
+# second `Automation()` in the same process fails ("Automation() failed") or
+# wedges so the next .NET call (e.g. AddObject) hangs indefinitely. The
+# production backend only ever builds one bridge, but tests (and any accidental
+# double-init) build several — which is exactly what wedged DWSIM during the
+# coverage run. Cache the manager once per process and share it across every
+# DWSIMBridgeV2 instance so a second construction can never collide.
+_GLOBAL_MGR = None
+_GLOBAL_MATERIAL_STREAM = None
+_GLOBAL_DWSIM_VERSION = None
+_GLOBAL_MGR_LOCK = threading.Lock()
+# The flowsheet registry is tied to the manager: since the manager is a process
+# singleton, the set of flowsheets registered inside it is also process-global.
+# Sharing this dict across all bridge instances lets a *new* bridge purge
+# flowsheets a *previous* bridge left in the shared manager — otherwise the new
+# bridge's empty per-instance registry purges nothing, stale sims accumulate,
+# and the next AddObject hangs on tag conflicts. (One bridge in production →
+# this is the same single dict it always owned; no behaviour change.)
+_GLOBAL_FLOWSHEETS: Dict[str, Dict] = {}
+
+
+def _unit_op_value_to_si(value: float, unit: str) -> float:
+    """Convert a unit-op property value from a friendly unit to DWSIM SI
+    internals (Pa, K, kg/s, mol/s). Unit-driven so it's unambiguous regardless
+    of which property is being set."""
+    u = (unit or "").strip().lower().replace("°", "")
+    v = float(value)
+    table = {
+        "bar": v * 1e5, "mbar": v * 100.0, "atm": v * 101325.0,
+        "kpa": v * 1e3, "mpa": v * 1e6, "psi": v * 6894.757,
+        "psia": v * 6894.757, "pa": v,
+        "c": v + 273.15, "degc": v + 273.15, "celsius": v + 273.15,
+        "f": (v - 32.0) * 5.0 / 9.0 + 273.15, "k": v, "kelvin": v,
+        "kg/h": v / 3600.0, "kgh": v / 3600.0, "kg_h": v / 3600.0,
+        "kg/s": v, "kgs": v,
+        "kmol/h": v / 3.6, "kmolh": v / 3.6, "mol/s": v, "mols": v,
+        "kw": v * 1e3, "mw": v * 1e6, "w": v,         # duty/power
+        "%": v, "percent": v, "frac": v, "fraction": v,
+    }
+    return table.get(u, v)
+
+
 class DWSIMBridgeV2:
 
     def __init__(self, dll_folder: Optional[str] = None):
@@ -820,8 +893,10 @@ class DWSIMBridgeV2:
 
         self.state = FlowsheetState()
 
-        # IMP-6: multi-flowsheet support
-        self._flowsheets:   Dict[str, Dict] = {}
+        # IMP-6: multi-flowsheet support. Share the process-global registry so
+        # it stays consistent with the shared singleton manager (see
+        # _GLOBAL_FLOWSHEETS). In production this is the one bridge's own dict.
+        self._flowsheets:   Dict[str, Dict] = _GLOBAL_FLOWSHEETS
         self._active_alias: Optional[str]   = None
         # Tracks whether the active flowsheet is mid-build (new_flowsheet called
         # but save_and_solve not yet run).  Used by the idempotency guard so
@@ -917,35 +992,57 @@ class DWSIMBridgeV2:
         except Exception as exc:
             return {"success": False, "error": f"clr.AddReference failed: {exc}"}
 
-        Automation = None
-        for cls_name in ("Automation3", "Automation2", "Automation"):
+        # ── Reuse the process-wide singleton manager if one already exists ──
+        # Constructing Automation() twice in a process wedges DWSIM; share the
+        # first one instead. Guarded so concurrent inits don't race.
+        global _GLOBAL_MGR, _GLOBAL_MATERIAL_STREAM, _GLOBAL_DWSIM_VERSION
+        with _GLOBAL_MGR_LOCK:
+            if _GLOBAL_MGR is not None:
+                self._mgr = _GLOBAL_MGR
+                self._MaterialStream = _GLOBAL_MATERIAL_STREAM
+                self._dwsim_version = _GLOBAL_DWSIM_VERSION or "unknown"
+                self._ready = True
+                return {"success": True,
+                        "message": "Reusing existing DWSIM Automation manager "
+                                   "(process singleton).",
+                        "reused": True,
+                        "dwsim_version": self._dwsim_version}
+
+            Automation = None
+            for cls_name in ("Automation3", "Automation2", "Automation"):
+                try:
+                    import importlib
+                    mod = importlib.import_module("DWSIM.Automation")
+                    Automation = getattr(mod, cls_name)
+                    break
+                except Exception:
+                    pass
+            if Automation is None:
+                return {"success": False,
+                        "error": "Cannot import Automation class"}
+
             try:
+                with suppress_dotnet_console(), \
+                     redirect_stdout(_sink), redirect_stderr(_sink):
+                    self._mgr = Automation()
+            except Exception as exc:
+                return {"success": False,
+                        "error": f"Automation() failed: {exc}",
+                        "traceback": traceback.format_exc()}
+
+            try:
+                with suppress_dotnet_console(), \
+                     redirect_stdout(_sink), redirect_stderr(_sink):
+                    clr.AddReference("DWSIM.Thermodynamics")  # type: ignore
                 import importlib
-                mod = importlib.import_module("DWSIM.Automation")
-                Automation = getattr(mod, cls_name)
-                break
+                smod = importlib.import_module("DWSIM.Thermodynamics.Streams")
+                self._MaterialStream = getattr(smod, "MaterialStream", None)
             except Exception:
-                pass
-        if Automation is None:
-            return {"success": False, "error": "Cannot import Automation class"}
+                self._MaterialStream = None
 
-        try:
-            with suppress_dotnet_console(), \
-                 redirect_stdout(_sink), redirect_stderr(_sink):
-                self._mgr = Automation()
-        except Exception as exc:
-            return {"success": False, "error": f"Automation() failed: {exc}",
-                    "traceback": traceback.format_exc()}
-
-        try:
-            with suppress_dotnet_console(), \
-                 redirect_stdout(_sink), redirect_stderr(_sink):
-                clr.AddReference("DWSIM.Thermodynamics")  # type: ignore
-            import importlib
-            smod = importlib.import_module("DWSIM.Thermodynamics.Streams")
-            self._MaterialStream = getattr(smod, "MaterialStream", None)
-        except Exception:
-            self._MaterialStream = None
+            # Publish to the process-wide cache for subsequent bridges.
+            _GLOBAL_MGR = self._mgr
+            _GLOBAL_MATERIAL_STREAM = self._MaterialStream
 
         self._ready = True
 
@@ -987,6 +1084,7 @@ class DWSIMBridgeV2:
             pass
 
         self._dwsim_version = dwsim_version
+        _GLOBAL_DWSIM_VERSION = dwsim_version
         result_msg = f"DWSIM v{dwsim_version} initialised from {self.dll_folder}"
         if api_warnings:
             result_msg += " | WARNINGS: " + "; ".join(api_warnings)
@@ -1000,27 +1098,126 @@ class DWSIMBridgeV2:
 
     # ── flowsheet file ops ────────────────────────────────────────────────────
 
-    def find_flowsheets(self) -> Dict[str, Any]:
+    def find_flowsheets(self, name_filter: str = "",
+                        max_results: int = 30,
+                        deep_scan: bool = False) -> Dict[str, Any]:
+        """Scan local disk for .dwxmz/.dwxm files.
+        name_filter: substring match on filename (case-insensitive).
+        max_results: cap on returned paths (default 30) — prevents huge tool
+        results that overflow LLM context. Full count is always reported.
+        deep_scan: if True, also walks the user home tree (slow, ~minutes on
+        large profiles). Default False — the targeted roots cover ~99% of cases.
+        """
+        # Targeted roots — these cover the typical DWSIM install + user docs
         roots = [
             os.path.expanduser("~/Documents"),
             os.path.expanduser("~/Desktop"),
             os.path.expanduser("~/Downloads"),
             os.path.expanduser(r"~\AppData\Local\DWSIM"),
+            r"C:\Program Files\DWSIM",
+            r"C:\Program Files\DWSIM\Samples",
         ]
-        found, seen = [], set()
-        for root in roots + [os.path.expanduser("~")]:
+        if deep_scan:
+            roots.append(os.path.expanduser("~"))
+
+        _LIMIT = int(os.getenv("FLOWSHEET_SCAN_LIMIT", "500"))
+        # Wall-clock budget to keep the scan responsive under the agent timeout
+        _BUDGET_S = float(os.getenv("FLOWSHEET_SCAN_BUDGET_S", "20.0"))
+        # Directory names that NEVER contain DWSIM flowsheets — skip aggressively
+        _SKIP_DIRS = {
+            "node_modules", ".git", ".vscode", ".idea", "__pycache__",
+            ".cache", "AppData",  # we already targeted AppData\Local\DWSIM explicitly
+            ".npm", ".pip", ".conda", "venv", ".venv", "env", ".env",
+            "OneDrive", "Dropbox", "Google Drive",   # cloud-sync wrappers are slow
+            "Microsoft", "Windows", "Temp", "Logs", "logs", "tmp",
+            ".m2", ".gradle", ".cargo", "Library",
+            "site-packages", "dist", "build",
+            ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        }
+        nf = (name_filter or "").lower().strip()
+        max_results = max(1, min(int(max_results or 30), 100))
+
+        found, seen, limit_hit, time_hit = [], set(), False, False
+        scan_start = time.time()
+
+        def _budget_left() -> bool:
+            return (time.time() - scan_start) < _BUDGET_S
+
+        for root in roots:
             if not root or not os.path.exists(root):
                 continue
-            for dirpath, _, filenames in os.walk(root):
+            if not _budget_left():
+                time_hit = True
+                break
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Aggressive pruning — modify dirnames IN-PLACE so os.walk
+                # doesn't descend into known-noisy paths
+                dirnames[:] = [d for d in dirnames
+                               if d not in _SKIP_DIRS and not d.startswith(".")]
+                if not _budget_left():
+                    time_hit = True
+                    break
                 for f in filenames:
                     if f.lower().endswith((".dwxmz", ".dwxm")):
+                        if nf and nf not in f.lower():
+                            continue
                         full = os.path.join(dirpath, f)
                         if full not in seen:
                             seen.add(full)
-                            found.append(full)
-                if len(found) > 50:
+                            try:
+                                mtime = os.path.getmtime(full)
+                            except OSError:
+                                mtime = 0.0
+                            found.append((mtime, full))
+                if len(found) >= _LIMIT:
+                    limit_hit = True
                     break
-        return {"success": True, "count": len(found), "flowsheets": found}
+            if limit_hit or time_hit:
+                break
+
+        # Sort by recency (newest first) so a small sample is the most useful one
+        found.sort(reverse=True)
+        all_paths = [p for _, p in found]
+        sample = all_paths[:max_results]
+
+        # Directory-level grouping summary so the agent can suggest where to look
+        from collections import Counter
+        dir_counts = Counter(os.path.dirname(p) for p in all_paths)
+        top_dirs = [{"path": d, "count": c}
+                    for d, c in dir_counts.most_common(10)]
+
+        scan_elapsed = round(time.time() - scan_start, 2)
+
+        warnings = []
+        if limit_hit:
+            warnings.append(f"Scan stopped at {_LIMIT} files (set FLOWSHEET_SCAN_LIMIT to raise).")
+        if time_hit:
+            warnings.append(
+                f"Scan stopped after {_BUDGET_S:.0f}s time budget. "
+                "Pass deep_scan=true OR a name_filter to scan further."
+            )
+
+        return {
+            "success": True,
+            "count": len(all_paths),
+            "returned": len(sample),
+            "flowsheets": sample,
+            "top_directories": top_dirs,
+            "filter_applied": nf or None,
+            "limit_hit": limit_hit,
+            "time_budget_hit": time_hit,
+            "scan_seconds": scan_elapsed,
+            "scan_limit": _LIMIT,
+            "hint": (
+                f"Returning {len(sample)} most-recent of {len(all_paths)} matches "
+                f"(scan took {scan_elapsed}s). "
+                "Pass name_filter to narrow (e.g. 'reactor', 'methanol'), "
+                "or load_flowsheet with a specific path."
+                if len(all_paths) > max_results else
+                f"All {len(all_paths)} matches returned (scan took {scan_elapsed}s)."
+            ),
+            **({"warning": " ".join(warnings)} if warnings else {}),
+        }
 
     def load_flowsheet(self, path: str,
                        alias: Optional[str] = None) -> Dict[str, Any]:
@@ -1154,7 +1351,10 @@ class DWSIMBridgeV2:
                 on_disk_mtime = os.path.getmtime(save_path)
             except Exception:
                 on_disk_mtime = 0.0
-            if on_disk_mtime - cached_mtime > 1.0:  # 1s tolerance
+            # 0.5s tolerance — was 1.0s, but rapid external edits within 1s
+            # were not detected. 0.5s is well above filesystem mtime precision
+            # (typically 1–10 ms on NTFS) while still tolerating clock drift.
+            if on_disk_mtime - cached_mtime > 0.5:
                 return {"success": False,
                         "conflict": True,
                         "code": "EXTERNAL_EDIT",
@@ -1202,10 +1402,18 @@ class DWSIMBridgeV2:
                                 self.state.loaded_mtime = new_mtime
                         except Exception:
                             new_mtime = 0.0
-                        return {"success": True,
-                                "saved_to": save_path,
-                                "mtime": new_mtime,
-                                "backup": backup}
+                        result = {
+                            "success": True,
+                            "saved_to": save_path,
+                            "mtime": new_mtime,
+                            "backup": backup,
+                        }
+                        if backup is None:
+                            result["backup_warning"] = (
+                                "Safety backup could not be created before save "
+                                "(disk full or permissions issue?)"
+                            )
+                        return result
                     except Exception:
                         pass
             return {"success": False,
@@ -1284,6 +1492,153 @@ class DWSIMBridgeV2:
                 objects.append({"guid": str(guid), "error": str(exc)})
         return {"success": True, "count": len(objects), "objects": objects}
 
+    def get_diagram(self) -> Dict[str, Any]:
+        """Build {success, nodes, edges, bounds} for the UI 'Diagram' tab from
+        the live flowsheet graphic objects + connectors.
+
+        The /flowsheet/diagram endpoint previously called this non-existent
+        method, so the Diagram tab always showed an empty/error diagram. Reads
+        each object's GraphicObject (position, size, tag, type, calculated) for
+        nodes and its OutputConnectors (AttachedToObjID) for edges."""
+        def _shape(tn: str) -> str:
+            t = (tn or "").lower()
+            if "stream" in t:                                   return "stream"
+            if any(k in t for k in ("heater", "cooler", "heatexchang")): return "heater"
+            if any(k in t for k in ("reactor", "cstr", "pfr", "gibbs")): return "reactor"
+            if any(k in t for k in ("column", "distillation", "absorption")): return "column"
+            if any(k in t for k in ("mixer", "splitter", "separat")):    return "mixer"
+            if "valve" in t:                                    return "valve"
+            return "unit"
+
+        fs = self._flowsheet
+        if fs is None:
+            return {"success": False, "nodes": [], "edges": [],
+                    "error": "No flowsheet loaded"}
+        coll = self._get_collection_for(fs)
+        if coll is None:
+            return {"success": False, "nodes": [], "edges": [],
+                    "error": "Cannot access SimulationObjects"}
+        nodes: List[Dict[str, Any]] = []
+        edges: List[Dict[str, Any]] = []
+        for guid, obj in self._iter_collection(coll):
+            try:
+                go = getattr(obj, "GraphicObject", None)
+                if go is None:
+                    continue
+                try: tname = obj.GetType().Name
+                except Exception: tname = ""
+                def _f(attr, default):
+                    try: return float(getattr(go, attr, default) or default)
+                    except Exception: return float(default)
+                is_energy = "energy" in (tname or "").lower()
+                nodes.append({
+                    "id": str(guid),
+                    "tag": str(getattr(go, "Tag", "") or guid),
+                    "x": _f("X", 0), "y": _f("Y", 0),
+                    "w": _f("Width", 40), "h": _f("Height", 40),
+                    "shape": _shape(tname), "description": tname,
+                    "calculated": bool(getattr(obj, "Calculated", False)),
+                })
+                for conn in list(getattr(go, "OutputConnectors", None) or []):
+                    try:
+                        if not getattr(conn, "IsAttached", False):
+                            continue
+                        to_id = getattr(conn, "AttachedToObjID", None)
+                        if to_id:
+                            edges.append({"from": str(guid), "to": str(to_id),
+                                          "energy": is_energy})
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        if not nodes:
+            return {"success": True, "nodes": [], "edges": [],
+                    "bounds": {"min_x": 0, "min_y": 0, "max_x": 0, "max_y": 0}}
+        bounds = {
+            "min_x": min(n["x"] for n in nodes),
+            "min_y": min(n["y"] for n in nodes),
+            "max_x": max(n["x"] + n["w"] for n in nodes),
+            "max_y": max(n["y"] + n["h"] for n in nodes),
+        }
+        return {"success": True, "nodes": nodes, "edges": edges, "bounds": bounds}
+
+    def get_unit_ops_details(self) -> Dict[str, Any]:
+        """Build the unit-operation list for the UI 'Unit Ops' tab:
+        {success, unit_ops: [{tag, type, calculated, properties}]}.
+
+        The /flowsheet/unitops endpoint previously called this method, which did
+        NOT exist — so the tab always showed 'No unit operations found' even with
+        a loaded, solved flowsheet. Builds from list_objects() (tags/types) plus
+        each unit op's get_object_properties()['summary'] (the displayable
+        fields), with a best-effort 'calculated' flag read by reflection."""
+        try:
+            objs = self.list_objects()
+            uops = objs.get("unit_ops", []) if isinstance(objs, dict) else []
+        except Exception as exc:
+            return {"success": False, "unit_ops": [], "error": str(exc)}
+        out: List[Dict[str, Any]] = []
+        for u in uops:
+            tag = u.get("tag", "")
+            if not tag:
+                continue
+            entry: Dict[str, Any] = {"tag": tag, "type": u.get("type", ""),
+                                     "calculated": False, "properties": {}}
+            try:
+                r = self.get_object_properties(tag)
+                if isinstance(r, dict) and r.get("success") is not False:
+                    p = r.get("properties", {}) or {}
+                    summary = p.get("summary") if isinstance(p.get("summary"), dict) else {}
+                    entry["properties"] = {
+                        k: (round(v, 6) if isinstance(v, float) else v)
+                        for k, v in (summary or {}).items()
+                        if isinstance(v, (int, float, str))
+                    }
+                    if not entry["type"] and p.get("dotnet_type"):
+                        entry["type"] = str(p["dotnet_type"]).split(".")[-1]
+            except Exception:
+                pass
+            try:
+                rc = self.reflect_get_set(tag, "Calculated")
+                if isinstance(rc, dict) and rc.get("success") and rc.get("value") is not None:
+                    entry["calculated"] = str(rc["value"]).strip().lower() in ("true", "1")
+                else:
+                    entry["calculated"] = bool(entry["properties"])
+            except Exception:
+                entry["calculated"] = bool(entry["properties"])
+            out.append(entry)
+        return {"success": True, "unit_ops": out}
+
+    def list_objects(self) -> Dict[str, Any]:
+        """Alias for list_simulation_objects(), but ALSO splits the flat
+        objects[] list into the {streams: [...], unit_ops: [...]} shape that
+        several callers (orchestrator, agent tool wrappers, api endpoints,
+        PFD generator, preflight validator) expect. Returns both keys so old
+        callers using either shape keep working."""
+        raw = self.list_simulation_objects()
+        if not isinstance(raw, dict) or not raw.get("success"):
+            return {"success": False, "streams": [], "unit_ops": [],
+                    "objects": [], "error": (raw or {}).get("error", "")}
+        streams, unit_ops = [], []
+        for o in raw.get("objects") or []:
+            if not isinstance(o, dict) or not o.get("tag"):
+                continue
+            cat = (o.get("category") or "").lower()
+            tn  = (o.get("type")     or "").lower()
+            if "stream" in cat or "materialstream" in tn or tn == "stream":
+                streams.append(o)
+            elif cat == "energy" or "energystream" in tn:
+                # Energy streams aren't decision variables; skip
+                continue
+            else:
+                unit_ops.append(o)
+        return {
+            "success":  True,
+            "streams":  streams,
+            "unit_ops": unit_ops,
+            "objects":  raw.get("objects", []),
+            "count":    raw.get("count", len(raw.get("objects") or [])),
+        }
+
     # ── property reading ──────────────────────────────────────────────────────
 
     def get_stream_properties(self, tag: str) -> Dict[str, Any]:
@@ -1325,6 +1680,11 @@ class DWSIMBridgeV2:
             direct=(),
             phase_attrs=("density", "Density"))
 
+        _EXPECTED = {
+            "temperature_K", "pressure_Pa", "molar_flow_mol_s",
+            "mass_flow_kg_s", "enthalpy_kJ_kg", "vapor_fraction",
+        }
+        missing = sorted(_EXPECTED - {k for k, v in props.items() if v is not None and k != "tag"})
         props = {k: v for k, v in props.items() if v is not None}
 
         if "temperature_K" in props:
@@ -1347,7 +1707,14 @@ class DWSIMBridgeV2:
         if mass_comps:
             props["mass_fractions"] = mass_comps
 
-        return {"success": True, "properties": props}
+        result: Dict[str, Any] = {"success": True, "properties": props}
+        if missing:
+            result["missing_properties"] = missing
+            result["convergence_hint"] = (
+                "Some properties are None — stream may not have converged. "
+                "Run simulation first or check recycle loop convergence."
+            )
+        return result
 
     def get_object_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)
@@ -1534,7 +1901,16 @@ class DWSIMBridgeV2:
                 "methods":   tried[:3]}
 
     def set_unit_op_property(self, tag: str, property_name: str,
-                             value: Any) -> Dict[str, Any]:
+                             value: Any, unit: str = "") -> Dict[str, Any]:
+        # Accept an optional unit and convert to DWSIM's SI internals up front,
+        # so a natural call like (OutletPressure, 5, "bar") works. Without this
+        # the agent had to pre-convert to Pa, and build_flowsheet_atomic crashed
+        # passing a unit positionally.
+        if unit:
+            try:
+                value = _unit_op_value_to_si(float(value), unit)
+            except Exception:
+                pass
         obj = self._find_object(tag)
         if obj is None:
             return {"success": False, "error": f"Object '{tag}' not found"}
@@ -1546,8 +1922,15 @@ class DWSIMBridgeV2:
                 pass
 
         # ── Heater/Cooler: OutletTemperature requires CalcMode set first ───────
+        # Accept outlet_temperature, outlet_temperature_C, outlet_temperature_K,
+        # outlettemp, etc. Strip the unit suffix and convert °C → K for DWSIM
+        # (DWSIM stores OutletTemperature in Kelvin).
         key_lower = property_name.lower().replace("_", "").replace(" ", "")
-        if key_lower == "outlettemperature":
+        _ot_keys = ("outlettemperature", "outlettemperaturec",
+                    "outlettemperaturek", "outlettemp", "outlettempc",
+                    "outlettempk", "outlettemperaturecelsius",
+                    "outlettemperaturekelvin")
+        if key_lower in _ot_keys:
             try:
                 typename = obj.GetType().Name
             except Exception:
@@ -1555,6 +1938,17 @@ class DWSIMBridgeV2:
             if any(t in typename for t in ("Heater", "Cooler")):
                 import System  # type: ignore
                 _sink = io.StringIO()
+                # Convert to Kelvin: if the key says C (or no unit and value
+                # looks like a Celsius temperature < 200), treat as Celsius.
+                val_f = float(value)
+                if key_lower.endswith(("k", "kelvin")):
+                    val_K = val_f
+                elif key_lower.endswith(("c", "celsius")):
+                    val_K = val_f + 273.15
+                else:
+                    # bare "outlettemperature": assume Celsius if < 200 (a
+                    # value > 200 is almost certainly already Kelvin)
+                    val_K = val_f + 273.15 if val_f < 200 else val_f
                 _calc_set = False
                 for attr in ("CalcMode", "SpecType", "CalculationMode"):
                     try:
@@ -1567,18 +1961,30 @@ class DWSIMBridgeV2:
                             break
                     except Exception:
                         continue
-                # Set OutletTemperature via Nullable<Double> reflection
+                # Set OutletTemperature (Kelvin) via Nullable<Double> reflection
                 try:
                     ot_prop = obj.GetType().GetProperty("OutletTemperature")
                     if ot_prop and ot_prop.CanWrite:
-                        ot_prop.SetValue(obj, System.Nullable[System.Double](float(value)))
+                        ot_prop.SetValue(obj, System.Nullable[System.Double](val_K))
                         return {"success": True,
-                                "message": f"Set CalcMode=OutletTemperature + OutletTemperature={value} on '{tag}'"}
-                except Exception as e:
+                                "calc_mode_set": _calc_set,
+                                "outlet_temperature_K": val_K,
+                                "message": (f"Set CalcMode=OutletTemperature + "
+                                            f"OutletTemperature={val_K:.2f} K "
+                                            f"({val_K-273.15:.2f} C) on '{tag}'")}
+                except Exception:
                     pass  # Fall through to generic setter below
 
         # ── OutletPressure on Pump/Compressor/Expander ────────────────────────
-        if key_lower == "outletpressure":
+        # The DWSIM Pump/Compressor/Expander outlet-pressure SPEC lives in the
+        # `Pout` property (a plain Double), NOT a property called
+        # "OutletPressure" (which does not exist). The value must be written with
+        # an explicit, type-correct reflection SetValue on the LIVE object — the
+        # generic `setattr` path silently no-ops on `Pout`. We also set CalcMode
+        # to the outlet-pressure mode first, then read the value back to confirm
+        # it actually took (DWSIM treats some of these as derived outputs).
+        if key_lower in ("outletpressure", "pout", "outlet_pressure",
+                          "pressureout", "outletp"):
             try:
                 typename = obj.GetType().Name
             except Exception:
@@ -1586,28 +1992,53 @@ class DWSIMBridgeV2:
             if any(t in typename for t in ("Pump", "Compressor", "Expander")):
                 import System  # type: ignore
                 _sink = io.StringIO()
-                for mode_name in ("OutletPressure", "Outlet_Pressure", "PressureOut"):
-                    for attr in ("CalcMode", "CalculationMode", "SpecType"):
-                        try:
-                            prop = obj.GetType().GetProperty(attr)
-                            if prop and prop.CanWrite and prop.PropertyType.IsEnum:
-                                ev = System.Enum.Parse(prop.PropertyType, mode_name)
-                                with redirect_stdout(_sink), redirect_stderr(_sink):
-                                    prop.SetValue(obj, ev)
-                                break
-                        except Exception:
-                            continue
-                    else:
+                pval = float(value)
+                # 1. Put the unit into outlet-pressure calculation mode.
+                for attr in ("CalcMode", "CalculationMode", "SpecType"):
+                    try:
+                        prop = obj.GetType().GetProperty(attr)
+                        if prop and prop.CanWrite and prop.PropertyType.IsEnum:
+                            for mode_name in ("OutletPressure", "Outlet_Pressure",
+                                              "Pressure", "P"):
+                                try:
+                                    ev = System.Enum.Parse(prop.PropertyType, mode_name)
+                                    with redirect_stdout(_sink), redirect_stderr(_sink):
+                                        prop.SetValue(obj, ev)
+                                    break
+                                except Exception:
+                                    continue
+                            break
+                    except Exception:
                         continue
-                    break
-                try:
-                    op_prop = obj.GetType().GetProperty("OutletPressure")
-                    if op_prop and op_prop.CanWrite:
-                        op_prop.SetValue(obj, System.Nullable[System.Double](float(value)))
-                        return {"success": True,
-                                "message": f"Set CalcMode=OutletPressure + OutletPressure={value} on '{tag}'"}
-                except Exception:
-                    pass  # Fall through to generic setter below
+                # 2. Write the spec, trying the real property names with
+                #    type-aware boxing, then confirm by read-back.
+                for pname in ("Pout", "OutletPressure", "POut", "P2"):
+                    try:
+                        sp = obj.GetType().GetProperty(pname)
+                        if not (sp and sp.CanWrite):
+                            continue
+                        pt = sp.PropertyType
+                        boxed = (System.Nullable[System.Double](pval)
+                                 if (pt.IsGenericType and "Nullable" in pt.Name)
+                                 else System.Double(pval))
+                        with redirect_stdout(_sink), redirect_stderr(_sink):
+                            sp.SetValue(obj, boxed)
+                        # read back to confirm it persisted
+                        rb = sp.GetValue(obj)
+                        rb_f = float(rb) if rb is not None else None
+                        if rb_f is not None and abs(rb_f - pval) <= max(abs(pval) * 1e-6, 1e-6):
+                            return {"success": True, "property": pname,
+                                    "read_back": rb_f,
+                                    "message": f"Set CalcMode=OutletPressure + {pname}={pval} on '{tag}'"}
+                    except Exception:
+                        continue
+                # If we reach here, no property retained the write — report
+                # honestly instead of a silent success.
+                return {"success": False,
+                        "error_code": "PUMP_PRESSURE_NOT_RETAINED",
+                        "error": (f"Could not set outlet pressure on '{tag}' "
+                                  f"({typename}): the spec property did not retain "
+                                  f"the value {pval} Pa.")}
 
         key_clean = property_name.lower().replace("_", "").replace(" ", "")
         # Try reflection first (handles .NET type boxing correctly)
@@ -1616,11 +2047,23 @@ class DWSIMBridgeV2:
                 if _reflect_set_typed(tp, obj, value):
                     return {"success": True,
                             "message": f"Set {tp.Name} = {value} on '{tag}'"}
-        # Fallback: setattr (works for some pythonnet-exposed properties)
-        target = next(
+        # Fallback: setattr — but ONLY if a matching attribute actually exists.
+        # Previously this fell back to the raw property_name even when no match
+        # was found, causing setattr to silently create a phantom attribute and
+        # return success while the live model was unchanged (silent failure).
+        matched = next(
             (a for a in dir(obj) if a.lower().replace("_", "") == key_clean),
-            property_name
+            None
         )
+        if matched is None:
+            # List the closest available writable properties to help the caller
+            avail = sorted({tp.Name for tp in obj.GetType().GetProperties()
+                            if tp.CanWrite})
+            return {"success": False,
+                    "error": (f"Property '{property_name}' not found / not "
+                              f"writable on '{tag}' ({obj.GetType().Name}). "
+                              f"No silent attribute set."),
+                    "available_writable": avail[:30]}
         coerced: Any = value
         for cast in (float, int):
             try:
@@ -1628,10 +2071,23 @@ class DWSIMBridgeV2:
             except (ValueError, TypeError):
                 pass
         try:
-            setattr(obj, target, coerced)
-            return {"success": True, "message": f"Set {target} = {coerced} on '{tag}'"}
+            setattr(obj, matched, coerced)
+            # Verify the write actually took by reading it back
+            try:
+                readback = getattr(obj, matched)
+                took = (readback == coerced or
+                        (isinstance(readback, float) and isinstance(coerced, (int, float))
+                         and abs(readback - coerced) < 1e-6))
+            except Exception:
+                took = True  # can't read back — assume ok
+            if not took:
+                return {"success": False,
+                        "error": f"setattr({matched}) did not change the value "
+                                 f"(read back {readback}, expected {coerced})",
+                        "silent_failure_caught": True}
+            return {"success": True, "message": f"Set {matched} = {coerced} on '{tag}'"}
         except Exception as exc:
-            return {"success": False, "error": str(exc), "tried": target}
+            return {"success": False, "error": str(exc), "tried": matched}
 
     # ── ACC-1: set stream composition ─────────────────────────────────────────
 
@@ -1756,32 +2212,100 @@ class DWSIMBridgeV2:
                 errors.append(f"Phase0.Compounds path: {e}")
 
         if set_count == 0:
-            return {"success": False,
-                    "error":   "Could not set any mole fractions",
-                    "details": errors[:5]}
+            # Distill many small errors into one actionable message
+            primary_cause = "unknown"
+            for e in errors:
+                if "not in InputComposition" in e or "not in flowsheet" in e:
+                    primary_cause = "component_not_in_flowsheet"
+                    break
+                if "InputComposition" in e and "not writable" in e:
+                    primary_cause = "input_composition_readonly"
+                    break
+                if "Compounds" in e:
+                    primary_cause = "phase_compounds_unreachable"
+                    break
+            hints = {
+                "component_not_in_flowsheet":  "Add the compound to the flowsheet first via DWSIM GUI or the compound manager.",
+                "input_composition_readonly":  "This stream may already be calculated. Try unlocking the stream or reload the flowsheet.",
+                "phase_compounds_unreachable": "Phase[0].Compounds is not exposed — DWSIM build may be incompatible.",
+                "unknown":                     "See raw_errors for details.",
+            }
+            return {
+                "success":    False,
+                "error":      f"Could not set composition on '{tag}'",
+                "cause":      primary_cause,
+                "hint":       hints[primary_cause],
+                "raw_errors": errors[:3],  # only first 3 to avoid noise
+            }
 
         return {
             "success":      True,
             "message":      f"Set {set_count} component mole fractions on '{tag}'",
             "compositions": compositions,
-            "errors":       errors or None,
+            **({"partial_errors": errors[:3]} if errors else {}),
         }
 
 
 
     # ── simulation execution ──────────────────────────────────────────────────
 
-    def run_simulation(self) -> Dict[str, Any]:
+    def run_simulation(self, auto_recover: bool = True) -> Dict[str, Any]:
+        """Solve the flowsheet. When auto_recover=True (default) AND the
+        first solve produces a recoverable convergence failure (e.g.
+        recycle non-convergence with no physical-validity errors), this
+        method silently escalates to robust_solve(strategy='robust') and
+        annotates the result with 'auto_recovery_applied'. Pass
+        auto_recover=False to disable for performance-critical inner
+        loops (e.g. inside an optimization eval where the optimizer
+        already handles failed evals via penalties)."""
         if self._flowsheet is None:
             return {"success": False, "error": "No flowsheet loaded"}
+
+        # ── Solve watchdog ────────────────────────────────────────────────
+        # A hung DWSIM solve must not wedge the whole agent. Run the solve
+        # call under a hard wall-clock timeout (SOLVE_TIMEOUT_S, default 300s).
+        # On timeout we return a structured SOLVE_TIMEOUT instead of blocking
+        # forever — the caller (optimizer / agent) can then move on.
+        import os as _os_wd
+        _solve_timeout = float(_os_wd.getenv("SOLVE_TIMEOUT_S", "300"))
+
+        def _do_solve():
+            for method in ("CalculateFlowsheet2", "SolveFlowsheet", "RunAll"):
+                if hasattr(self._mgr, method):
+                    try:
+                        getattr(self._mgr, method)(self._flowsheet)
+                        return True, None
+                    except Exception as exc:
+                        return False, f"{method}: {exc}"
+            return False, "no manager solve method"
+
         errors, solved = [], False
-        for method in ("CalculateFlowsheet2", "SolveFlowsheet", "RunAll"):
-            if hasattr(self._mgr, method):
+        try:
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+                _fut = _pool.submit(_do_solve)
                 try:
-                    getattr(self._mgr, method)(self._flowsheet)
-                    solved = True; break
-                except Exception as exc:
-                    errors.append(f"{method}: {exc}")
+                    solved, _err = _fut.result(timeout=_solve_timeout)
+                    if _err:
+                        errors.append(_err)
+                except _cf.TimeoutError:
+                    self._solve_timed_out = True
+                    return {
+                        "success": False,
+                        "error_code": "SOLVE_TIMEOUT",
+                        "error": (f"Solve exceeded the {_solve_timeout:.0f}s "
+                                  "watchdog timeout and was abandoned. The "
+                                  "flowsheet may be ill-posed (no solution) or "
+                                  "DWSIM is wedged. Try simpler specs, or "
+                                  "increase SOLVE_TIMEOUT_S."),
+                        "timed_out": True,
+                    }
+        except Exception as _wd_exc:
+            # Watchdog infrastructure failed — fall back to a direct call so we
+            # never lose the ability to solve because of the watchdog itself.
+            solved, _err = _do_solve()
+            if _err:
+                errors.append(_err)
         if not solved:
             for method in ("Solve", "Calculate", "Run"):
                 if hasattr(self._flowsheet, method):
@@ -1793,7 +2317,13 @@ class DWSIMBridgeV2:
         if not solved:
             return {"success": False, "error": "No working solve method",
                     "attempts": errors}
-        self._rebuild_active_cache()
+        try:
+            self._rebuild_active_cache()
+        except Exception as _cache_exc:
+            import logging as _logging
+            _logging.getLogger("dwsim_bridge").warning(
+                "Cache rebuild failed after solve: %s", _cache_exc
+            )
 
         conv_errors = []
         for attr in ("Errors", "CalculationErrors", "Messages"):
@@ -1823,18 +2353,163 @@ class DWSIMBridgeV2:
         except Exception:
             pass
 
+        # Auto-diagnose: if any stream did not converge, automatically run
+        # the root-cause analyzer so the agent gets a ranked list of likely
+        # causes + suggested fixes in the SAME response, without having to
+        # call diagnose_convergence separately.
+        not_conv = convergence.get("not_converged") or []
+        phys_warn = convergence.get("physical_warnings") or []
+        diagnosis = None
+        if not_conv or phys_warn or conv_errors:
+            try:
+                diagnosis = self._auto_diagnose_solve_failure(
+                    convergence, conv_errors)
+            except Exception as _diag_exc:
+                import logging as _logging
+                _logging.getLogger("dwsim_bridge").debug(
+                    "auto-diagnose failed: %s", _diag_exc)
+
         result = {
             "success":            True,
             "message":            "Simulation completed",
             "convergence_errors": conv_errors or None,
             "convergence_check":  convergence,
         }
+        if diagnosis:
+            result["diagnosis"] = diagnosis
+            # Promote the diagnosis to a top-level warning so the agent
+            # sees it without having to inspect nested dicts.
+            top_causes = [d.get("cause", "?") for d in diagnosis.get("diagnoses", [])[:3]]
+            if top_causes:
+                result["diagnosis_summary"] = (
+                    f"Convergence issues detected. Top causes: " +
+                    ", ".join(top_causes) +
+                    ". Inspect 'diagnosis' for fixes."
+                )
         if safety_warnings:
             result["safety_warnings"] = safety_warnings
             result["safety_status"]   = "VIOLATIONS_DETECTED"
         else:
             result["safety_status"]   = "PASSED"
+
+        # Auto-recovery: if convergence failed (recycles didn't close,
+        # streams flagged "not_converged") AND no physical-validity errors
+        # AND auto_recover is enabled, silently escalate to robust_solve.
+        # This is the autonomous-recovery layer the user can rely on without
+        # having to manually call robust_solve themselves.
+        recoverable = (
+            auto_recover
+            and not getattr(self, "_in_auto_recovery", False)
+            and (convergence.get("not_converged") or conv_errors)
+            # Don't retry if there are physical-validity errors — those
+            # require user intervention (wrong bounds, bad property package)
+            and not convergence.get("physical_warnings")
+        )
+        if recoverable:
+            try:
+                self._in_auto_recovery = True
+                # ── DIAGNOSIS-DRIVEN recovery ──────────────────────────────
+                # Instead of always running the same blind cascade, inspect the
+                # diagnosis and choose the strategy most likely to fix the
+                # *specific* cause. Falls back to robust_solve if no targeted
+                # action applies.
+                diag = result.get("diagnosis") or {}
+                top_causes = [d.get("cause_code", "")
+                              for d in diag.get("diagnoses", [])]
+                strategy, action = self._select_recovery_strategy(top_causes)
+
+                rs = None
+                if action == "initialize_column" and hasattr(self, "initialize_distillation"):
+                    # Column failed → re-initialise it (escalating algorithms)
+                    try:
+                        init_r = self.initialize_distillation()
+                        if init_r.get("success"):
+                            rs = self.save_and_solve() if hasattr(self, "save_and_solve") \
+                                 else self.robust_solve(max_attempts=2, strategy="robust")
+                    except Exception:
+                        rs = None
+                if rs is None:
+                    rs = self.robust_solve(max_attempts=3, strategy=strategy)
+
+                if rs.get("success") and rs.get("convergence_check", {}) \
+                        .get("all_converged", True):
+                    rs["auto_recovery_applied"] = True
+                    rs["recovery_strategy"]     = strategy
+                    rs["recovery_targeted_cause"] = top_causes[0] if top_causes else None
+                    rs["auto_recovery_note"] = (
+                        f"Initial solve had convergence issues "
+                        f"(cause: {top_causes[0] if top_causes else 'unknown'}). "
+                        f"Recovered via diagnosis-driven strategy '{strategy}'"
+                        + (" + column re-initialisation" if action == "initialize_column" else "")
+                        + ". Original diagnosis in 'pre_recovery_diagnosis'."
+                    )
+                    rs["pre_recovery_diagnosis"] = result.get("diagnosis")
+                    return rs
+                # Recovery didn't help — surface both attempts
+                result["auto_recovery_attempted"] = True
+                result["auto_recovery_failed"]    = True
+                result["recovery_attempts"]       = rs.get("_attempts", [])
+            except Exception as _r_exc:
+                import logging as _logging
+                _logging.getLogger("dwsim_bridge").warning(
+                    "auto-recovery raised: %s", _r_exc)
+            finally:
+                self._in_auto_recovery = False
+
         return result
+
+    def _select_recovery_strategy(self, cause_codes: List[str]) -> Tuple[str, str]:
+        """Map diagnosed convergence cause(s) to a targeted recovery strategy.
+        Returns (robust_solve_strategy, special_action).
+
+        This is the 'reasoning' the critical analysis asked for: rather than a
+        fixed Direct→Wegstein→Broyden cascade for every failure, choose the
+        approach that addresses the actual root cause."""
+        causes = set(cause_codes or [])
+        # Column convergence → re-initialise the column (escalating algorithms)
+        if "COLUMN_CONVERGENCE" in causes:
+            return ("aggressive", "initialize_column")
+        # Recycle non-convergence → aggressive reload + alternative tear methods
+        if "RECYCLE_CONVERGENCE" in causes or "CONVERGENCE_MAX_ITER" in causes:
+            return ("aggressive", "robust")
+        # Flash failure → robust reload (re-flash from a fresh state)
+        if "FLASH_CONVERGENCE" in causes:
+            return ("robust", "robust")
+        # Default
+        return ("robust", "robust")
+
+    def _auto_diagnose_solve_failure(
+        self,
+        convergence: Dict[str, Any],
+        conv_errors: List[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Invoke industrial_features.diagnose_convergence with the current
+        flowsheet state. Returns the diagnosis dict, or None if the
+        analyzer is unavailable."""
+        try:
+            from industrial_features import diagnose_convergence
+        except Exception:
+            return None
+
+        # Gather object_states — stream properties for each loaded stream
+        object_states: Dict[str, Dict[str, Any]] = {}
+        try:
+            sr = self.get_simulation_results()
+            for tag, props in (sr.get("stream_results") or {}).items():
+                object_states[tag] = props
+        except Exception:
+            pass
+
+        # Inject the conv_errors text into the convergence dict so the
+        # diagnoser can pattern-match against DWSIM's own error messages
+        conv_state = dict(convergence)
+        if conv_errors:
+            conv_state.setdefault("errors", []).extend(conv_errors)
+
+        try:
+            return diagnose_convergence(conv_state, object_states)
+        except Exception:
+            return None
 
     def get_simulation_results(self) -> Dict[str, Any]:
         if self._flowsheet is None:
@@ -1868,25 +2543,48 @@ class DWSIMBridgeV2:
         return {"success": True, **result}
 
     def _check_convergence_internal(self) -> Dict[str, Any]:
-        converged, not_converged, missing = [], [], []
+        converged, not_converged, missing, warnings = [], [], [], []
         for tag in self.state.streams:
             r = self.get_stream_properties(tag)
             if not r["success"]:
                 missing.append(tag)
                 continue
             p = r["properties"]
-            # A stream is considered converged if T, P, and at least one flow are set
             has_T = "temperature_K" in p
             has_P = "pressure_Pa" in p
             has_F = "molar_flow_mol_s" in p or "mass_flow_kg_s" in p
-            if has_T and has_P and has_F:
+
+            # Physical-validity checks beyond presence
+            physical_issues = []
+            T = p.get("temperature_K")
+            P = p.get("pressure_Pa")
+            VF = p.get("vapor_fraction")
+            MF = p.get("mass_flow_kg_s")
+            NF = p.get("molar_flow_mol_s")
+            if T is not None and (T <= 0 or T > 5000):
+                physical_issues.append(f"T={T:.1f}K out of range (0,5000]")
+            if P is not None and (P <= 0 or P > 1e9):
+                physical_issues.append(f"P={P:.0f}Pa out of range (0,1e9]")
+            if VF is not None and not (-1e-6 <= VF <= 1 + 1e-6):
+                physical_issues.append(f"VF={VF:.4f} not in [0,1]")
+            if MF is not None and MF < 0:
+                physical_issues.append(f"MassFlow={MF:.4g} negative")
+            if NF is not None and NF < 0:
+                physical_issues.append(f"MolarFlow={NF:.4g} negative")
+
+            if has_T and has_P and has_F and not physical_issues:
                 converged.append(tag)
             else:
                 missing_props = []
                 if not has_T: missing_props.append("T")
                 if not has_P: missing_props.append("P")
                 if not has_F: missing_props.append("flow")
-                not_converged.append({"tag": tag, "missing": missing_props})
+                entry = {"tag": tag, "missing": missing_props}
+                if physical_issues:
+                    entry["physical_issues"] = physical_issues
+                not_converged.append(entry)
+            if physical_issues:
+                warnings.append({"tag": tag, "issues": physical_issues})
 
         all_ok = len(not_converged) == 0 and len(missing) == 0
         return {
@@ -1894,6 +2592,7 @@ class DWSIMBridgeV2:
             "converged":       converged,
             "not_converged":   not_converged,
             "inaccessible":    missing,
+            "physical_warnings": warnings,
         }
 
     # ── ACC-3: property package ───────────────────────────────────────────────
@@ -1909,6 +2608,36 @@ class DWSIMBridgeV2:
             "property_package": pkg,
             "description":      _PP_DESCRIPTIONS.get(pkg.upper(), pkg),
         }
+
+    def list_compounds(self) -> Dict[str, Any]:
+        """Read the SelectedCompounds collection from the loaded flowsheet.
+
+        Returns {success, compounds: [...names...], count}. The list is what
+        the state-card builder uses to confirm the flowsheet is real."""
+        if self._flowsheet is None:
+            return {"success": False, "compounds": [], "count": 0,
+                    "error": "No flowsheet loaded"}
+        compounds: List[str] = []
+        try:
+            sc = getattr(self._flowsheet, "SelectedCompounds", None)
+            if sc is not None:
+                try:
+                    compounds = [str(k) for k in sc.Keys]
+                except Exception:
+                    # Some DWSIM builds use a different collection interface
+                    try:
+                        compounds = [str(c.Name) for c in sc]
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Update the cached state so subsequent state-card builds are fast
+        try:
+            self.state.compounds = list(compounds)
+        except Exception:
+            pass
+        return {"success": True, "compounds": compounds,
+                "count": len(compounds)}
 
     def _read_property_package(self, fs) -> str:
         """Try various DWSIM API paths to read the property package name."""
@@ -2242,10 +2971,20 @@ class DWSIMBridgeV2:
         population_size: int = 15,
         seed: int = 42,
         on_progress=None,
+        method: str = "auto",
+        nlopt_algorithm: str = "isres",
     ) -> Dict[str, Any]:
         """
-        Multi-variable optimization with inequality constraints.
+        Multi-variable optimization with nonlinear constraints.
         Critical for industrial applications with product spec requirements.
+
+        method : "auto" (default) | "nlopt" | "de"
+            "auto"/"nlopt" use NLopt when available — constraints are handled
+            NATIVELY (the solver searches the feasible region) rather than via a
+            penalty added to the objective. Default NLopt algorithm is GN_ISRES
+            (global, supports inequality AND equality "==" constraints).
+            "de" (or auto-fallback when NLopt is absent) uses the legacy
+            Differential-Evolution + penalty path.
 
         variables : [{tag, property, unit, lower, upper}, ...]
         observe_tag / observe_property : objective to minimize/maximize
@@ -2365,15 +3104,66 @@ class DWSIMBridgeV2:
                     pass
             return fval
 
-        result = differential_evolution(
-            objective, bounds,
-            maxiter=max_iter,
-            popsize=population_size,
-            seed=seed,
-            tol=1e-5,
-            mutation=(0.5, 1.5),
-            recombination=0.9,
-        )
+        # ── Preferred path: NLopt with native constraint handling ───────────
+        class _Res:
+            __slots__ = ("x", "success")
+            def __init__(self, x, success):
+                self.x, self.success = x, success
+
+        result = None
+        solver_backend = "Differential Evolution + penalty (SciPy)"
+        method_l = (method or "auto").strip().lower()
+        try:
+            from nlopt_constrained import nlopt_available, run_nlopt_constrained
+        except Exception:
+            nlopt_available = lambda: False  # noqa: E731
+
+        if method_l in ("auto", "nlopt") and nlopt_available() and constraints:
+            def _evaluate_for_nlopt(x_vec):
+                eval_count[0] += 1
+                if base_path:
+                    self.load_flowsheet(base_path, alias=base_alias)
+                _set_vars(x_vec)
+                if not self.run_simulation().get("success"):
+                    return {"objective": None, "constraint_values": []}
+                obj_val = _get_obs()
+                cvals = []
+                for c in constraints:
+                    r = self.get_stream_properties(c["tag"])
+                    if not r.get("success"):
+                        r = self.get_object_properties(c["tag"])
+                    cvals.append(r.get("properties", {}).get(c["property"]))
+                cvals = [float(v) if v is not None else None for v in cvals]
+                if obj_val is not None:
+                    history.append({
+                        "eval": eval_count[0],
+                        "variables": {v["tag"]+"."+v["property"]: round(float(xi), 4)
+                                      for v, xi in zip(variables, x_vec)},
+                        "objective": round(obj_val, 6)})
+                return {"objective": obj_val, "constraint_values": cvals}
+
+            x0 = [float(v.get("initial", 0.5 * (lo + hi)))
+                  for v, (lo, hi) in zip(variables, bounds)]
+            nl = run_nlopt_constrained(
+                _evaluate_for_nlopt,
+                lower=[b[0] for b in bounds], upper=[b[1] for b in bounds],
+                x0=x0, constraint_specs=constraints, minimize=minimize,
+                max_evals=max(200, int(max_iter) * 3),
+                algorithm=nlopt_algorithm, seed=seed)
+            if nl.get("success"):
+                result = _Res(list(nl["x"]), bool(nl["feasible"]))
+                solver_backend = f"NLopt {nl['algorithm']} (native constraints)"
+
+        if result is None:
+            result = differential_evolution(
+                objective, bounds,
+                maxiter=max_iter,
+                popsize=population_size,
+                seed=seed,
+                tol=1e-5,
+                mutation=(0.5, 1.5),
+                recombination=0.9,
+            )
 
         # Final evaluation at optimum
         if base_path:
@@ -2403,6 +3193,7 @@ class DWSIMBridgeV2:
             "all_constraints_satisfied": all_satisfied,
             "evaluations":          eval_count[0],
             "scipy_success":        result.success,
+            "solver_backend":       solver_backend,
             "stream_results":       stream_res,
             "history":              history[-20:],  # last 20 for context
         }
@@ -2414,10 +3205,19 @@ class DWSIMBridgeV2:
         n_points: int = 10,
         max_iter_per_point: int = 50,
         seed: int = 42,
+        method: str = "auto",
+        n_gen: int = 15,
     ) -> Dict[str, Any]:
         """
-        Multi-objective optimization via weighted sum scalarization.
-        Generates a Pareto front approximation for industrial trade-off analysis.
+        Multi-objective optimization producing a Pareto front for trade-off
+        analysis (e.g. purity vs energy).
+
+        method : "auto" (default) | "nsga2" | "weighted_sum"
+            "auto"/"nsga2" use NSGA-II (pymoo) when available — a true
+            non-dominated search that recovers NON-CONVEX Pareto fronts in one
+            run with no manual weights. "weighted_sum" (or auto-fallback when
+            pymoo is absent) uses the legacy weight-sweep, which can only reach
+            the convex hull of the front.
 
         objectives : [{tag, property, unit, minimize, weight_start, weight_end}, ...]
             Each objective is weighted from weight_start to weight_end across n_points.
@@ -2455,6 +3255,61 @@ class DWSIMBridgeV2:
             if not r.get("success"):
                 r = self.get_object_properties(obj_spec["tag"])
             return r.get("properties", {}).get(obj_spec["property"])
+
+        # ── Preferred path: NSGA-II (true non-dominated, non-convex fronts) ──
+        method_l = (method or "auto").strip().lower()
+        try:
+            from multiobjective_nsga import pymoo_available, run_nsga2
+        except Exception:
+            pymoo_available = lambda: False  # noqa: E731
+
+        if method_l in ("auto", "nsga2", "nsga-ii", "nsga_ii") and pymoo_available():
+            def _eval_objs(x_vec: List[float]) -> Optional[List[float]]:
+                if base_path:
+                    self.load_flowsheet(base_path, alias=base_alias)
+                for v, xi in zip(variables, x_vec):
+                    r = self.set_stream_property(
+                        v["tag"], v["property"], float(xi), v.get("unit", ""))
+                    if not r["success"]:
+                        self.set_unit_op_property(
+                            v["tag"], v["property"], float(xi))
+                if not self.run_simulation().get("success"):
+                    return None
+                vals = []
+                for obj_spec in objectives:
+                    val = _get_obj_val(obj_spec)
+                    if val is None:
+                        return None
+                    vals.append(float(val))
+                return vals
+
+            try:
+                # Map the legacy n_points budget onto an NSGA-II population.
+                pop = max(12, int(n_points), 4 * len(objectives))
+                out = run_nsga2(_eval_objs, variables, objectives,
+                                pop_size=pop, n_gen=int(n_gen), seed=int(seed))
+                # Leave the flowsheet at the first front point for inspection.
+                if out.get("pareto_front"):
+                    first = out["pareto_front"][0]["optimal_variables"]
+                    if base_path:
+                        self.load_flowsheet(base_path, alias=base_alias)
+                    for v in variables:
+                        key = f"{v['tag']}.{v['property']}"
+                        if key in first:
+                            xi = first[key]
+                            if not self.set_stream_property(
+                                    v["tag"], v["property"], float(xi),
+                                    v.get("unit", ""))["success"]:
+                                self.set_unit_op_property(
+                                    v["tag"], v["property"], float(xi))
+                    self.run_simulation()
+                return out
+            except Exception as exc:
+                _log.warning("NSGA-II failed (%s); falling back to weighted-sum.",
+                             exc)
+                # fall through to weighted-sum below
+
+        # ── Fallback: weighted-sum scalarization (convex front only) ─────────
 
         for i in range(n_points):
             alpha = i / max(n_points - 1, 1)  # 0 → 1
@@ -2534,6 +3389,142 @@ class DWSIMBridgeV2:
             "objectives":   [f"{o['tag']}.{o['property']}" for o in objectives],
             "variables":    [f"{v['tag']}.{v['property']}" for v in variables],
         }
+
+    def global_sensitivity(
+        self,
+        variables: List[Dict],
+        output_tag: str,
+        output_property: str,
+        method: str = "sobol",
+        n_samples: int = 16,
+        num_levels: int = 4,
+        seed: int = 42,
+    ) -> Dict[str, Any]:
+        """
+        GLOBAL sensitivity analysis (SALib): rank decision variables by their
+        influence on an output, including INTERACTION effects — something the
+        local parametric_study sweeps (and Aspen's Sensitivity block) cannot do.
+
+        variables       : [{tag, property, unit, lower, upper}, ...]
+        output_tag/_property : the scalar output to analyse
+        method          : "sobol" (variance-based S1/ST) | "morris" (screening)
+        n_samples       : base sample size. Total DWSIM solves ≈ N·(D+2) for
+                          Sobol, r·(D+1) for Morris — each solve is expensive,
+                          so keep this modest.
+
+        Returns a ranking of variables by influence (ST for Sobol, mu_star for
+        Morris) plus the raw indices.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        if not variables:
+            return {"success": False, "error": "variables list is empty"}
+        try:
+            from global_sensitivity import salib_available, run_global_sensitivity
+        except Exception as exc:
+            return {"success": False,
+                    "error": f"global_sensitivity module unavailable: {exc}"}
+        if not salib_available():
+            return {"success": False,
+                    "error": "SALib not installed: pip install SALib"}
+
+        base_path  = self._flowsheet_path
+        base_alias = self._active_alias
+
+        def _evaluate(x_vec):
+            if base_path:
+                self.load_flowsheet(base_path, alias=base_alias)
+            for v, xi in zip(variables, x_vec):
+                r = self.set_stream_property(
+                    v["tag"], v["property"], float(xi), v.get("unit", ""))
+                if not r["success"]:
+                    self.set_unit_op_property(
+                        v["tag"], v["property"], float(xi))
+            if not self.run_simulation().get("success"):
+                return None
+            r = self.get_stream_properties(output_tag)
+            if not r.get("success"):
+                r = self.get_object_properties(output_tag)
+            val = r.get("properties", {}).get(output_property)
+            return float(val) if val is not None else None
+
+        return run_global_sensitivity(
+            _evaluate, variables,
+            output_name=f"{output_tag}.{output_property}",
+            method=method, n_samples=int(n_samples),
+            num_levels=int(num_levels), seed=int(seed))
+
+    def optimize_eo(
+        self,
+        variables: List[Dict],
+        observe_tag: str,
+        observe_property: str,
+        constraints: Optional[List[Dict]] = None,
+        minimize: bool = True,
+        n_samples: int = 0,
+        seed: int = 42,
+        max_refine: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Equation-oriented (EO) optimization — the Aspen-EO analogue.
+
+        Builds a smooth ALGEBRAIC surrogate of the flowsheet from a
+        Latin-hypercube DOE, then solves the optimisation + model SIMULTANEOUSLY
+        as one NLP (IPOPT via Pyomo when an IPOPT binary is installed, else SciPy
+        SLSQP on the identical model), and validates the optimum with a real
+        DWSIM solve.
+
+        variables   : [{tag, property, unit, lower, upper}, ...]
+        observe_tag/_property : objective quantity
+        constraints : [{tag, property, operator, value}, ...] (optional)
+
+        Returns the EO result incl. surrogate-vs-actual gap and fit quality.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        if not variables:
+            return {"success": False, "error": "variables list is empty"}
+        try:
+            from eo_optimizer import run_eo_optimization
+        except Exception as exc:
+            return {"success": False,
+                    "error": f"eo_optimizer unavailable: {exc}"}
+
+        base_path  = self._flowsheet_path
+        base_alias = self._active_alias
+        cons = constraints or []
+
+        def _evaluate(x_vec):
+            if base_path:
+                self.load_flowsheet(base_path, alias=base_alias)
+            for v, xi in zip(variables, x_vec):
+                r = self.set_stream_property(
+                    v["tag"], v["property"], float(xi), v.get("unit", ""))
+                if not r["success"]:
+                    self.set_unit_op_property(
+                        v["tag"], v["property"], float(xi))
+            if not self.run_simulation().get("success"):
+                return {"objective": None, "constraint_values": []}
+            r = self.get_stream_properties(observe_tag)
+            if not r.get("success"):
+                r = self.get_object_properties(observe_tag)
+            obj = r.get("properties", {}).get(observe_property)
+            cvals = []
+            for c in cons:
+                rr = self.get_stream_properties(c["tag"])
+                if not rr.get("success"):
+                    rr = self.get_object_properties(c["tag"])
+                cvals.append(rr.get("properties", {}).get(c["property"]))
+            return {"objective": float(obj) if obj is not None else None,
+                    "constraint_values": [float(v) if v is not None else None
+                                          for v in cvals]}
+
+        return run_eo_optimization(
+            _evaluate, variables,
+            constraint_specs=[{"operator": c.get("operator", ">="),
+                               "value": c.get("value")} for c in cons],
+            minimize=minimize, n_samples=int(n_samples), seed=int(seed),
+            max_refine=int(max_refine))
 
     def parametric_study_2d(
         self,
@@ -3158,6 +4149,157 @@ class DWSIMBridgeV2:
             ],
         }
 
+    # ── End-to-end NL optimization workflow (poster flow) ─────────────────
+    def optimize_flowsheet_with_llm(
+        self,
+        goal:       str,
+        llm        = None,
+        max_iter:  int = 50,
+        tolerance: float = 1e-3,
+        on_step    = None,
+        on_eval    = None,
+    ) -> Dict[str, Any]:
+        """Run the poster's end-to-end workflow:
+            1) discover decision variables from the loaded flowsheet
+            2) ask the LLM to map the goal to an objective spec
+            3) run DWSIM-internal optimization (DotNumerics)
+            4) format poster-style result for the chat
+
+        on_step(stage, detail)    — high-level stage callback
+        on_eval(it, params, obj, best) — per-solver-eval callback
+
+        Returns {success, spec, result, chat_markdown}."""
+        try:
+            from optimization_orchestrator import run_optimization_workflow
+        except Exception as exc:
+            return {"success": False,
+                    "error_code": "ORCHESTRATOR_LOAD_FAILED",
+                    "error": str(exc)}
+        return run_optimization_workflow(
+            self, goal=str(goal), llm=llm,
+            on_step=on_step, on_eval=on_eval,
+            max_iter=int(max_iter), tolerance=float(tolerance),
+        )
+
+    # ── Dynamic reflection access (escape-hatch tools) ───────────────────
+
+    def reflect_get_set(self, object_name: str, property_path: str,
+                         value: str = None) -> Dict[str, Any]:
+        """GET or SET any property on any DWSIM object via .NET reflection."""
+        from dwsim_reflection import reflect_get_set as _rgs
+        return _rgs(self, object_name, property_path, value)
+
+    def exec_python(self, code: str, timeout_s: float = 60.0) -> Dict[str, Any]:
+        """Execute a sandboxed Python snippet against the live flowsheet."""
+        from dwsim_reflection import exec_python as _ep
+        return _ep(self, code, timeout_s)
+
+    def inspect_object(self, object_name: str, filter_prefix: str = "",
+                        filter_type: str = "", max_props: int = 80) -> Dict[str, Any]:
+        """Discover all readable properties on any DWSIM object."""
+        from dwsim_reflection import inspect_object as _io
+        return _io(self, object_name, filter_prefix, filter_type, max_props)
+
+    def iterative_spec_loop(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """Bisection loop: adjust a variable until an observable meets a spec."""
+        from dwsim_reflection import iterative_spec_loop as _isl
+        return _isl(self, spec)
+
+    # ── TRUE DWSIM-internal optimization (OptimizationCase) ──────────────
+    def optimize_with_internal_engine(
+        self,
+        variables:   List[Dict],
+        objective:   Dict,
+        minimize:    bool  = True,
+        method:      str   = "simplex",
+        max_iter:    int   = 100,
+        tolerance:   float = 1e-4,
+        case_name:   str   = "AI_Optimization",
+        on_progress  = None,
+    ) -> Dict[str, Any]:
+        """Run DWSIM's native OptimizationCase engine — the SAME engine the
+        DWSIM GUI Optimizer button uses. Builds an OptimizationCase with
+        OPTVariable objects, attaches an expression objective, and drives
+        DotNumerics (AL_LBFGS_B / DN_NELDERMEAD_SIMPLEX_B / DN_LBFGS_B).
+
+        This produces an optimization that can be saved inside the .dwxmz
+        file for later inspection in the DWSIM GUI."""
+        try:
+            from dwsim_internal_optimizer import run_dwsim_internal_optimization
+        except Exception as exc:
+            return {"success": False,
+                    "error_code": "DWSIM_INTERNAL_OPT_UNAVAILABLE",
+                    "error": str(exc)}
+        return run_dwsim_internal_optimization(
+            self, variables=variables, objective=objective,
+            minimize=minimize, method=method,
+            max_iter=int(max_iter), tolerance=float(tolerance),
+            case_name=str(case_name), on_progress=on_progress,
+        )
+
+    # ── Robust optimization for complex flowsheets ────────────────────────
+    def optimize_complex(
+        self,
+        variables:    List[Dict],
+        objective:    Dict,
+        minimize:     bool = True,
+        max_iter:     int = 80,
+        tolerance:    float = 1e-3,
+        widen_bounds: bool = True,
+        multi_solver: bool = True,
+        llm          = None,
+        user_goal:   str = "",
+        on_step      = None,
+        on_eval      = None,
+    ) -> Dict[str, Any]:
+        """Robust multi-stage optimization with bound-widening and LLM
+        sanity-check, designed for complex flowsheets where the simple
+        single-shot path fails (recycle loops, multimodal landscapes,
+        wrong bounds). See complex_optimizer.run_complex_optimization."""
+        try:
+            from complex_optimizer import run_complex_optimization
+        except Exception as exc:
+            return {"success": False,
+                    "error_code": "COMPLEX_OPT_LOAD_FAILED",
+                    "error": str(exc)}
+        return run_complex_optimization(
+            self, variables=variables, objective=objective,
+            minimize=minimize, max_iter=int(max_iter),
+            tolerance=float(tolerance), widen_bounds=widen_bounds,
+            multi_solver=multi_solver, llm=llm, user_goal=user_goal,
+            on_step=on_step, on_eval=on_eval,
+        )
+
+    # ── DWSIM-native optimization ─────────────────────────────────────────
+    def dwsim_optimize(
+        self,
+        variables:   List[Dict],
+        objective:   Dict,
+        method:      str  = "simplex",
+        minimize:    bool = True,
+        max_iter:    int  = 50,
+        tolerance:   float = 1e-3,
+        on_progress=None,
+    ) -> Dict[str, Any]:
+        """Run optimization using DWSIM's INTERNAL solvers (L-BFGS-B,
+        Nelder-Mead Simplex, Truncated Newton, Powell, Differential
+        Evolution) — same algorithms the DWSIM GUI Optimizer uses, but
+        driven programmatically with full observability.
+
+        See dwsim_native_optimizer.run_dwsim_native_optimization for the
+        full schema of variables and objective."""
+        try:
+            from dwsim_native_optimizer import run_dwsim_native_optimization
+        except Exception as exc:
+            return {"success": False,
+                    "error_code": "NATIVE_OPT_LOAD_FAILED",
+                    "error": f"dwsim_native_optimizer module missing: {exc}"}
+        return run_dwsim_native_optimization(
+            self, variables=variables, objective=objective,
+            method=method, minimize=minimize, max_iter=max_iter,
+            tolerance=tolerance, on_progress=on_progress,
+        )
+
     def monte_carlo_study(
         self,
         vary_params:      List[Dict],   # [{tag, property, unit, distribution, param1, param2}, ...]
@@ -3400,196 +4542,6 @@ class DWSIMBridgeV2:
                                   "observed": list(row.values())[1]}
                                  for row in table],
             "errors":           errors or None,
-        }
-
-    # ── Bayesian Optimisation ─────────────────────────────────────────────────
-
-    def bayesian_optimize(
-        self,
-        variables:        List[Dict],   # [{tag, property, unit, lower_bound, upper_bound}]
-        observe_tag:      str,
-        observe_property: str,
-        minimize:         bool  = True,
-        n_initial:        int   = 5,    # Latin-Hypercube exploration evaluations
-        max_iter:         int   = 20,   # GP-BO exploitation iterations
-        tolerance:        float = 1e-4, # early-stop tolerance
-        seed:             int   = 42,
-        on_progress:      Optional[Any] = None,
-    ) -> Dict[str, Any]:
-        """
-        Bayesian Optimisation of DWSIM operating conditions.
-
-        Uses a Gaussian Process surrogate with Expected Improvement acquisition
-        to find optimal operating conditions in n_initial + max_iter simulations
-        (typically 10–25 total) vs 100+ for differential_evolution.
-
-        Best for:
-          • 1–5 decision variables
-          • Expensive simulations (each DWSIM call >10 s)
-          • Smooth objective landscapes
-
-        Parameters
-        ──────────
-        variables        : list of dicts, each with keys:
-                           tag, property, unit, lower_bound, upper_bound
-        observe_tag      : tag of the stream whose property to optimise
-        observe_property : property key, e.g. 'temperature_C', 'molar_flow_mols'
-        minimize         : True to minimise (default), False to maximise
-        n_initial        : Latin-Hypercube initial evaluations (exploration)
-        max_iter         : BO iterations (exploitation). Total = n_initial + max_iter.
-        tolerance        : early-stop if improvement < tolerance for 5 consecutive iters
-        seed             : random seed for reproducibility
-        on_progress      : optional callback(iter, total, x_vals, y_val, best_y)
-
-        Returns
-        ───────
-        Dict with keys:
-          success, optimal_inputs, optimal_output, minimize,
-          converged, n_evaluations, surrogate_r2, convergence_curve,
-          history, message
-        """
-        if self._flowsheet is None:
-            return {"success": False, "error": "No flowsheet loaded"}
-        if not self._flowsheet_path:
-            return {"success": False, "error": "No flowsheet path — required for reload"}
-        if not variables:
-            return {"success": False, "error": "variables list is empty"}
-        if len(variables) > 10:
-            return {"success": False,
-                    "error": "Too many variables (max 10). Use optimize_multivar for >10."}
-
-        try:
-            from bayesian_optimizer import BayesianOptimizer  # local module
-        except ImportError:
-            return {"success": False,
-                    "error": "bayesian_optimizer.py not found in backend directory"}
-
-        base_path  = self._flowsheet_path
-        base_alias = self._active_alias
-        call_count = [0]
-
-        # ── objective function ────────────────────────────────────────────────
-        def objective(x_actual):
-            call_count[0] += 1
-            # Reload flowsheet fresh for each evaluation
-            load_r = self.load_flowsheet(base_path, alias=base_alias)
-            if not load_r.get("success"):
-                return float("inf")
-
-            # Apply decision variable values
-            for xi, var in zip(x_actual, variables):
-                tag  = var["tag"]
-                prop = var["property"]
-                unit = var.get("unit", "")
-
-                set_r = self.set_stream_property(tag, prop, float(xi), unit)
-                if not set_r.get("success"):
-                    set_r = self.set_unit_op_property(tag, prop, float(xi))
-                if not set_r.get("success"):
-                    return float("inf")
-
-            # Solve
-            run_r = self.run_simulation()
-            if not run_r.get("success"):
-                return float("inf")
-
-            # Read objective
-            obs_r = self.get_stream_properties(observe_tag)
-            if not obs_r.get("success"):
-                # Try unit op fallback
-                obs_r = self.get_object_properties(observe_tag)
-            if not obs_r.get("success"):
-                return float("inf")
-
-            # Search in both properties and nested dicts
-            props = obs_r.get("properties") or obs_r
-            val   = props.get(observe_property)
-            if val is None:
-                # Try dot-notation fallback
-                for k, v in props.items():
-                    if isinstance(v, dict):
-                        val = v.get(observe_property)
-                        if val is not None:
-                            break
-            if val is None:
-                return float("inf")
-
-            return float(val)
-
-        # ── progress wrapper ─────────────────────────────────────────────────
-        total_evals = n_initial + max_iter
-
-        def _progress(it, total, x_vals, y_val, best_y):
-            tag_vals = [
-                {"tag": v["tag"], "property": v["property"],
-                 "unit": v.get("unit", ""), "value": round(xv, 6)}
-                for v, xv in zip(variables, x_vals)
-            ]
-            status = "INIT" if it <= n_initial else "BO"
-            print(f"  [BO {status} {it:3d}/{total}] "
-                  f"y={y_val:.6g}  best={best_y:.6g}  "
-                  f"vars={[round(xv, 4) for xv in x_vals]}")
-            if callable(on_progress):
-                try:
-                    on_progress(it, total, tag_vals, y_val, best_y)
-                except Exception:
-                    pass
-
-        # ── run BO ───────────────────────────────────────────────────────────
-        bounds = [(float(v["lower_bound"]), float(v["upper_bound"])) for v in variables]
-
-        opt = BayesianOptimizer(
-            bounds      = bounds,
-            n_initial   = n_initial,
-            max_iter    = max_iter,
-            minimize    = minimize,
-            tolerance   = tolerance,
-            seed        = seed,
-            on_progress = _progress,
-        )
-
-        try:
-            result = opt.optimize(objective)
-        except Exception as exc:
-            return {"success": False, "error": f"BO failed: {exc}"}
-
-        # ── format output (matches optimize_multivar interface) ───────────────
-        optimal_vars = [
-            {
-                "tag":      v["tag"],
-                "property": v["property"],
-                "unit":     v.get("unit", ""),
-                "optimal":  round(float(xi), 6),
-                "lower":    v["lower_bound"],
-                "upper":    v["upper_bound"],
-            }
-            for v, xi in zip(variables, result.best_x)
-        ]
-
-        return {
-            "success":          True,
-            "optimal_inputs":   optimal_vars,
-            "optimal_output":   {
-                "tag":      observe_tag,
-                "property": observe_property,
-                "value":    round(result.best_y, 6),
-            },
-            "minimize":         minimize,
-            "converged":        result.converged,
-            "n_evaluations":    result.n_evaluations,
-            "surrogate_r2":     result.surrogate_r2,
-            "convergence_curve": [round(v, 6) for v in result.convergence],
-            "history":          [
-                {"x": [round(xi, 6) for xi in hx], "y": round(hy, 6)}
-                for hx, hy in zip(result.history_x, result.history_y)
-            ][-30:],   # last 30 for API response size
-            "message": (
-                f"Bayesian optimisation {'converged' if result.converged else 'completed'} "
-                f"in {result.n_evaluations} evaluations "
-                f"(GP surrogate R²={result.surrogate_r2}). "
-                f"{'Min' if minimize else 'Max'} {observe_property}="
-                f"{round(result.best_y, 4)}."
-            ),
         }
 
     # ── v3: distillation column ───────────────────────────────────────────────
@@ -4202,6 +5154,31 @@ class DWSIMBridgeV2:
             return {"success": False,
                     "error": "No active flowsheet — call new_flowsheet first"}
 
+        # Guard against a DUPLICATE TAG. DWSIM's AddObject *hangs indefinitely*
+        # (rather than erroring) when an object with the same tag already
+        # exists, which wedges the entire single-instance bridge — observed
+        # when a build plan is re-run without a clean new_flowsheet. Detect it
+        # up front and return a clean error instead of hanging.
+        try:
+            _coll = self._get_collection_for(fs)
+            if _coll is not None:
+                _want = str(tag).strip().lower()
+                for _k, _o in self._iter_collection(_coll):
+                    try:
+                        _go = getattr(_o, "GraphicObject", None)
+                        _ex = getattr(_go, "Tag", None) if _go is not None else None
+                        if _ex and str(_ex).strip().lower() == _want:
+                            return {"success": False,
+                                    "error_code": "DUPLICATE_TAG",
+                                    "error": f"An object tagged '{tag}' already "
+                                             f"exists in the active flowsheet. Use "
+                                             f"a unique tag, or call new_flowsheet "
+                                             f"to start fresh."}
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
         from flowsheet_builder import _resolve_type
         import System  # type: ignore
         _sink = io.StringIO()
@@ -4726,6 +5703,218 @@ class DWSIMBridgeV2:
 
         result.pop("_fs", None)  # safety cleanup
         return result
+
+    # ── Atomic flowsheet build ────────────────────────────────────────────────
+
+    def build_flowsheet_atomic(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build, connect, configure, and solve a flowsheet in one call.
+
+        Reduces ~30 sequential tool calls (new_flowsheet + N*add_object +
+        M*connect_streams + set_props + save_and_solve) to a single atomic
+        operation.  Validation happens before DWSIM runs, so errors are
+        surfaced as actionable messages rather than confusing silent failures.
+
+        spec keys
+        ─────────
+        name            : str          Flowsheet name (used as filename)
+        compounds       : list[str]    DWSIM compound names
+        property_package: str          e.g. "Peng-Robinson (PR)"
+        objects         : list[dict]   {tag, type}  — MaterialStream, Heater, …
+        connections     : list[dict]   {from_tag, to_tag, from_port=0, to_port=0}
+        feed_specs      : list[dict]   {tag, temperature?, temperature_unit?,
+                                        pressure?, pressure_unit?,
+                                        massflow?, massflow_unit?,
+                                        molarflow?, molarflow_unit?,
+                                        vapor_fraction?,
+                                        composition?}
+        unit_op_specs   : list[dict]   {tag, property_name, value, unit?}
+        save_path       : str (opt)    Override save path
+
+        Returns the same envelope as save_and_solve(), extended with
+        build_log (step-by-step record) and build_errors (non-fatal issues).
+        """
+        build_log:    List[str]    = []
+        build_errors: List[str]    = []
+
+        def _log(msg: str)         -> None: build_log.append(msg)
+        def _err(msg: str, fatal=False):
+            build_errors.append(msg)
+            if fatal:
+                raise RuntimeError(msg)
+
+        # ── Pre-flight validation ─────────────────────────────────────────────
+        name       = str(spec.get("name") or "flowsheet").strip()
+        compounds  = spec.get("compounds") or []
+        pp         = str(spec.get("property_package") or "Peng-Robinson (PR)").strip()
+        objects    = spec.get("objects") or []
+        conns      = spec.get("connections") or []
+        feed_specs = spec.get("feed_specs") or []
+        uo_specs   = spec.get("unit_op_specs") or []
+        save_path  = spec.get("save_path")
+
+        if not compounds:
+            return {"success": False, "error": "spec.compounds is required",
+                    "hint": "Provide a list of DWSIM compound names, e.g. ['Water', 'Methanol']."}
+        if not objects:
+            return {"success": False, "error": "spec.objects is required",
+                    "hint": "Provide objects list: [{tag: 'Feed', type: 'MaterialStream'}, ...]"}
+
+        # Tag uniqueness check
+        tags = [o.get("tag","") for o in objects]
+        dup  = [t for t in tags if tags.count(t) > 1 and t]
+        if dup:
+            _err(f"Duplicate object tags: {list(set(dup))} — every tag must be unique.")
+
+        # Connection endpoint check
+        tag_set = set(tags)
+        for c in conns:
+            for key in ("from_tag", "to_tag"):
+                t = c.get(key, "")
+                if t not in tag_set:
+                    _err(f"Connection references unknown tag '{t}'. "
+                         f"Known tags: {sorted(tag_set)}")
+
+        if build_errors:
+            return {"success": False,
+                    "error": "Pre-flight validation failed",
+                    "issues": build_errors,
+                    "hint": "Fix the listed issues and retry build_flowsheet_atomic."}
+
+        try:
+            # ── Step 1: create flowsheet ──────────────────────────────────────
+            _log(f"new_flowsheet: name={name!r}, compounds={compounds}, pp={pp!r}")
+            r = self.new_flowsheet(name, compounds, pp,
+                                   save_path=save_path or None)
+            if not r.get("success"):
+                return {"success": False,
+                        "error": f"new_flowsheet failed: {r.get('error')}",
+                        "build_log": build_log,
+                        "hint": "Check that compound names match DWSIM's database exactly. "
+                                "Call get_available_compounds to verify."}
+
+            # ── Step 2: add objects ───────────────────────────────────────────
+            for obj in objects:
+                tag  = obj.get("tag", "")
+                otype = obj.get("type", "")
+                r = self.add_object(tag, otype)
+                if r.get("success"):
+                    _log(f"add_object OK: {otype} '{tag}'")
+                else:
+                    _err(f"add_object FAILED: {otype} '{tag}' — {r.get('error')}",
+                         fatal=False)
+
+            if build_errors:
+                # Don't proceed if any objects failed — connections would fail too
+                return {"success": False,
+                        "error": "Failed to add one or more objects",
+                        "issues": build_errors,
+                        "build_log": build_log,
+                        "hint": "Check that type names match exactly: MaterialStream, "
+                                "EnergyStream, Heater, Cooler, Pump, Compressor, Separator, "
+                                "ConversionReactor, Mixer, Splitter, DistillationColumn, etc."}
+
+            # ── Step 3: connect streams ───────────────────────────────────────
+            for c in conns:
+                ft   = c.get("from_tag", "")
+                tt   = c.get("to_tag", "")
+                fp   = int(c.get("from_port", 0))
+                tp   = int(c.get("to_port", 0))
+                r = self.connect_streams(ft, tt, fp, tp)
+                if r.get("success"):
+                    _log(f"connect OK: {ft}:{fp} → {tt}:{tp}")
+                else:
+                    _err(f"connect FAILED: {ft}→{tt} — {r.get('error')}", fatal=False)
+
+            # ── Step 4: feed stream specs ─────────────────────────────────────
+            for fs_spec in feed_specs:
+                tag = fs_spec.get("tag", "")
+                # Temperature
+                if fs_spec.get("temperature") is not None:
+                    u = str(fs_spec.get("temperature_unit") or "K")
+                    r = self.set_stream_property(tag, "temperature",
+                                                 float(fs_spec["temperature"]), u)
+                    if not r.get("success"):
+                        _err(f"set T on '{tag}': {r.get('error')}", fatal=False)
+                    else:
+                        _log(f"set T '{tag}': {fs_spec['temperature']} {u}")
+                # Pressure
+                if fs_spec.get("pressure") is not None:
+                    u = str(fs_spec.get("pressure_unit") or "Pa")
+                    r = self.set_stream_property(tag, "pressure",
+                                                 float(fs_spec["pressure"]), u)
+                    if not r.get("success"):
+                        _err(f"set P on '{tag}': {r.get('error')}", fatal=False)
+                    else:
+                        _log(f"set P '{tag}': {fs_spec['pressure']} {u}")
+                # Mass flow
+                if fs_spec.get("massflow") is not None:
+                    u = str(fs_spec.get("massflow_unit") or "kg/s")
+                    r = self.set_stream_property(tag, "mass_flow",
+                                                 float(fs_spec["massflow"]), u)
+                    if not r.get("success"):
+                        _err(f"set massflow on '{tag}': {r.get('error')}", fatal=False)
+                    else:
+                        _log(f"set massflow '{tag}': {fs_spec['massflow']} {u}")
+                # Molar flow (alternative to mass flow)
+                elif fs_spec.get("molarflow") is not None:
+                    u = str(fs_spec.get("molarflow_unit") or "mol/s")
+                    r = self.set_stream_property(tag, "molar_flow",
+                                                 float(fs_spec["molarflow"]), u)
+                    if not r.get("success"):
+                        _err(f"set molarflow on '{tag}': {r.get('error')}", fatal=False)
+                    else:
+                        _log(f"set molarflow '{tag}': {fs_spec['molarflow']} {u}")
+                # Vapor fraction
+                if fs_spec.get("vapor_fraction") is not None:
+                    r = self.set_stream_property(tag, "vapor_fraction",
+                                                 float(fs_spec["vapor_fraction"]), "")
+                    if not r.get("success"):
+                        _err(f"set VF on '{tag}': {r.get('error')}", fatal=False)
+                # Composition
+                if fs_spec.get("composition"):
+                    r = self.set_stream_composition(tag, fs_spec["composition"])
+                    if not r.get("success"):
+                        _err(f"set composition on '{tag}': {r.get('error')}", fatal=False)
+                    else:
+                        _log(f"set composition '{tag}': {fs_spec['composition']}")
+
+            # ── Step 5: unit op specs ─────────────────────────────────────────
+            for uo in uo_specs:
+                tag  = uo.get("tag", "")
+                prop = str(uo.get("property_name") or "")
+                val  = uo.get("value")
+                unit = str(uo.get("unit") or "")
+                if val is None or not prop:
+                    continue
+                r = self.set_unit_op_property(tag, prop, str(val), unit)
+                if r.get("success"):
+                    _log(f"set {prop} on '{tag}': {val} {unit}")
+                else:
+                    _err(f"set {prop} on '{tag}': {r.get('error')}", fatal=False)
+
+            # ── Step 6: solve ─────────────────────────────────────────────────
+            _log("save_and_solve starting…")
+            result = self.save_and_solve()
+            result["build_log"]    = build_log
+            result["build_errors"] = build_errors
+            if build_errors:
+                result.setdefault("warnings", [])
+                result["warnings"].append(
+                    f"{len(build_errors)} non-fatal build error(s); "
+                    "see build_errors for details.")
+            _log(f"save_and_solve → converged={result.get('converged')}")
+            return result
+
+        except RuntimeError as exc:
+            # Fatal pre-flight error
+            return {"success": False, "error": str(exc),
+                    "build_log": build_log, "build_errors": build_errors,
+                    "hint": "Fix the listed build_errors and retry."}
+        except Exception as exc:
+            return {"success": False,
+                    "error": f"build_flowsheet_atomic crashed: {exc}",
+                    "build_log": build_log, "build_errors": build_errors}
 
     # ── v5: phase-specific results ────────────────────────────────────────────
 
@@ -5686,6 +6875,37 @@ class DWSIMBridgeV2:
 
     # ── v5: delete / disconnect ───────────────────────────────────────────────
 
+    def _clear_connectors(self, go) -> int:
+        """Detach every input/output connector on a graphic object. Returns the
+        number of connectors cleared. Used by delete + disconnect so no dangling
+        attachment survives in the connected objects."""
+        cleared = 0
+        for attr in ("InputConnectors", "OutputConnectors"):
+            conns = getattr(go, attr, None)
+            if conns is None:
+                continue
+            # .NET collections may not be Python-iterable — fall back to index.
+            try:
+                items = list(conns)
+            except Exception:
+                try:
+                    items = [conns[i] for i in range(conns.Count)]
+                except Exception:
+                    items = []
+            for conn in items:
+                try:
+                    ct = type(conn)
+                    for name, val in (("IsAttached", False),
+                                      ("AttachedToObjID", ""),
+                                      ("AttachedConnector", None)):
+                        tp = ct.GetProperty(name)
+                        if tp and tp.CanWrite:
+                            tp.SetValue(conn, val)
+                    cleared += 1
+                except Exception:
+                    pass
+        return cleared
+
     def delete_object(self, tag: str) -> Dict[str, Any]:
         """Remove a stream or unit operation from the active flowsheet."""
         if self._flowsheet is None:
@@ -5694,58 +6914,81 @@ class DWSIMBridgeV2:
         if obj is None:
             return {"success": False, "error": f"Object '{tag}' not found"}
 
-        deleted = False
-
-        # Strategy 1: flowsheet.DeleteSimulationObject(guid)
+        fs = self._flowsheet
         coll = self._get_collection()
         obj_guid: Optional[str] = None
-        if coll:
-            tag_cache = self._active_tag_cache()
-            for guid, human in tag_cache.items():
-                if human.strip() == tag.strip():
-                    obj_guid = guid
-                    break
-        if obj_guid:
-            for method in ("DeleteSimulationObject", "RemoveSimulationObject",
-                           "DeleteObject", "RemoveObject"):
-                if hasattr(self._flowsheet, method):
-                    try:
-                        getattr(self._flowsheet, method)(obj_guid)
-                        deleted = True
-                        break
-                    except Exception:
-                        pass
+        tag_cache = self._active_tag_cache()
+        for guid, human in tag_cache.items():
+            if human.strip() == tag.strip():
+                obj_guid = guid
+                break
 
-        # Strategy 2: collection Remove
-        if not deleted and coll and obj_guid:
-            for method in ("Remove", "remove"):
-                if hasattr(coll, method):
-                    try:
-                        getattr(coll, method)(obj_guid)
-                        deleted = True
-                        break
-                    except Exception:
-                        pass
+        go = getattr(obj, "GraphicObject", None)
+        _sink = io.StringIO()
 
-        # Strategy 3: manager-level delete
-        if not deleted:
-            for method in ("DeleteSimulationObject", "RemoveSimulationObject"):
-                if hasattr(self._mgr, method):
-                    try:
-                        getattr(self._mgr, method)(self._flowsheet, obj)
-                        deleted = True
-                        break
-                    except Exception:
-                        pass
+        # Best-effort: clear this object's connectors first so no dangling
+        # references survive in the connected objects.
+        if go is not None:
+            self._clear_connectors(go)
 
-        if not deleted:
-            return {"success": False,
-                    "error": f"Could not delete '{tag}' — no working delete API found"}
+        # DWSIM's full GUI-equivalent delete (disconnects + removes from both
+        # collections) — try several signatures.
+        if go is not None:
+            for sig in ((None, None, go, False, False), (None, None, go), (go,)):
+                for method in ("DeleteSelectedObject", "DeleteObject", "RemoveObject"):
+                    if hasattr(fs, method):
+                        try:
+                            with redirect_stdout(_sink), redirect_stderr(_sink):
+                                getattr(fs, method)(*sig)
+                        except Exception:
+                            continue
 
-        # Remove from tag cache and state
+        # Explicitly remove the GUID from BOTH collections (the previous code
+        # only touched SimulationObjects, so a deleted object's GraphicObject
+        # lingered and it kept showing up as "still present").
+        for collname in ("SimulationObjects", "GraphicObjects"):
+            c = getattr(fs, collname, None)
+            if c is None or not hasattr(c, "Remove"):
+                continue
+            for key in (obj_guid, tag):
+                if not key:
+                    continue
+                try:
+                    with redirect_stdout(_sink), redirect_stderr(_sink):
+                        c.Remove(key)
+                except Exception:
+                    pass
+
+        # Clean local caches.
         if obj_guid and self._active_alias in self._flowsheets:
             self._flowsheets[self._active_alias]["tag_cache"].pop(obj_guid, None)
         self._rebuild_active_cache()
+
+        # CRITICAL: also remove the tag from the staged build-state. During the
+        # build phase list_simulation_objects returns self.state (not the live
+        # collection), so without this the object kept showing up as "still
+        # present" even though it was removed from DWSIM.
+        try:
+            st = self.state
+            for lst in ("streams", "unit_ops"):
+                seq = getattr(st, lst, None)
+                if seq is not None and tag in seq:
+                    seq.remove(tag)
+            if hasattr(st, "object_types"):
+                st.object_types.pop(tag, None)
+        except Exception:
+            pass
+
+        # VERIFY against BOTH the live collection and the staged state. This
+        # turns the old silent "reported success but still present" failure into
+        # an honest result.
+        st = getattr(self, "state", None)
+        still_staged = bool(st and (tag in getattr(st, "streams", [])
+                                    or tag in getattr(st, "unit_ops", [])))
+        if self._find_object(tag) is not None or still_staged:
+            return {"success": False, "error_code": "DELETE_NOT_VERIFIED",
+                    "error": f"Delete of '{tag}' did not take effect — the object "
+                             f"is still present in the flowsheet."}
 
         return {"success": True,
                 "message": f"Deleted '{tag}' from flowsheet"}
@@ -5765,51 +7008,38 @@ class DWSIMBridgeV2:
         if str_obj is None:
             return {"success": False, "error": f"Stream '{stream_tag}' not found"}
 
+        import io as _io
+        fs = self._flowsheet
+        go_uo = getattr(uo_obj, "GraphicObject", None)
+        go_str = getattr(str_obj, "GraphicObject", None)
+        _sink = _io.StringIO()
         disconnected = False
 
-        # Strategy 1: DisconnectObject / DisconnectStream on flowsheet
-        for method in ("DisconnectObject", "DisconnectStream",
-                       "Disconnect", "RemoveConnection"):
-            if hasattr(self._flowsheet, method):
-                for args in [(uo_obj, str_obj), (str_obj, uo_obj),
-                             (uo_tag, stream_tag), (stream_tag, uo_tag)]:
-                    try:
-                        getattr(self._flowsheet, method)(*args)
-                        disconnected = True
-                        break
-                    except Exception:
-                        pass
+        # Strategy 1: DWSIM's real API is DisconnectObjects(IGraphicObject,
+        # IGraphicObject) — the inverse of ConnectObjects. The previous code only
+        # tried the (non-existent) singular "DisconnectObject" with SIMULATION
+        # objects, which never matched — hence "no working disconnect API found".
+        for method in ("DisconnectObjects", "DisconnectObject", "Disconnect"):
+            if not hasattr(fs, method):
+                continue
+            for a, b in ((go_uo, go_str), (go_str, go_uo)):
+                if a is None or b is None:
+                    continue
+                try:
+                    with redirect_stdout(_sink), redirect_stderr(_sink):
+                        getattr(fs, method)(a, b)
+                    disconnected = True
+                    break
+                except Exception:
+                    continue
             if disconnected:
                 break
 
-        # Strategy 2: Graphic connector manipulation
+        # Strategy 2: clear the connectors directly on both graphic objects.
         if not disconnected:
-            for obj in (uo_obj, str_obj):
-                try:
-                    go = getattr(obj, "GraphicObject", None)
-                    if go is None:
-                        continue
-                    conns = (getattr(go, "InputConnectors", None) or [] +
-                             getattr(go, "OutputConnectors", None) or [])
-                    for conn in conns:
-                        try:
-                            attached_id = getattr(conn, "AttachedToObjID", None)
-                            other_tag   = self._active_tag_cache().get(
-                                str(attached_id), str(attached_id))
-                            if (other_tag == uo_tag or
-                                    other_tag == stream_tag):
-                                # clear attachment
-                                conn_type = type(conn)
-                                for attr in ("IsAttached", "AttachedToObjID"):
-                                    tp = conn_type.GetProperty(attr)
-                                    if tp and tp.CanWrite:
-                                        tp.SetValue(conn,
-                                            False if attr == "IsAttached" else "")
-                                disconnected = True
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            for go in (go_uo, go_str):
+                if go is not None and self._clear_connectors(go) > 0:
+                    disconnected = True
 
         if not disconnected:
             return {

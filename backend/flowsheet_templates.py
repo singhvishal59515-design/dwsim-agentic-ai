@@ -411,11 +411,12 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                 # First heat-recovery exchanger HRE-1 → cools REF-P to 350°C
                 _u("HRE-1",    "Cooler",     outlet_temperature_C=350.0,
                    delta_p_bar=0.0),
-                # High-temperature water-gas shift (75% CO conversion)
+                # High-temperature water-gas shift (75% CO conversion, 350-430°C)
                 _u("HTS-101",  "ConversionReactor", conversion=0.75),
                 _u("HRE-2",    "Cooler",     outlet_temperature_C=210.0,
                    delta_p_bar=0.05),
-                _u("LTS-101",  "ConversionReactor", conversion=0.75),
+                # Low-temperature WGS (85% conversion, 210-250°C, Ullah 2025)
+                _u("LTS-101",  "ConversionReactor", conversion=0.85),
                 _u("HRE-3",    "Cooler",     outlet_temperature_C=38.0,
                    delta_p_bar=0.05),
                 # Two-phase separator: water condensate vs vapor
@@ -500,10 +501,16 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
             ],
             # Reactions to be configured separately via setup_reaction
             "reactions": {
+                # EquilibriumReactor: SMR and dry reforming occur simultaneously
+                # at 909°C. Kp values from thermodynamic tables (NIST-JANAF).
                 "REF-101": [
                     {"name": "SMR",  "type": "equilibrium",
                      "stoichiometry": {"Methane": -1, "Water": -1,
                                        "Carbon monoxide": 1, "Hydrogen": 3},
+                     "base_compound": "Methane"},
+                    {"name": "DRY-REF", "type": "equilibrium",
+                     "stoichiometry": {"Methane": -1, "Carbon dioxide": -1,
+                                       "Carbon monoxide": 2, "Hydrogen": 2},
                      "base_compound": "Methane"},
                 ],
                 "HTS-101": [
@@ -513,10 +520,11 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                      "base_compound": "Carbon monoxide", "conversion": 0.75},
                 ],
                 "LTS-101": [
+                    # 0.85 conversion at 210-250°C (Ullah 2025)
                     {"name": "WGS-LT", "type": "conversion",
                      "stoichiometry": {"Carbon monoxide": -1, "Water": -1,
                                        "Carbon dioxide": 1, "Hydrogen": 1},
-                     "base_compound": "Carbon monoxide", "conversion": 0.75},
+                     "base_compound": "Carbon monoxide", "conversion": 0.85},
                 ],
                 "COMB-101": [
                     {"name": "CH4-COMB", "type": "conversion",
@@ -539,6 +547,267 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                 "DWSIM with response surface methodology.' Digital Chemical "
                 "Engineering 14, 100205. https://doi.org/10.1016/j.dche.2024.100205"
             ),
+        },
+    },
+
+    # ── HYDROGEN (GIBBS REACTOR VARIANT) ─────────────────────────────────────
+    # Same as biogas_smr_h2 but REF-101 uses GibbsReactor instead of
+    # EquilibriumReactor. GibbsReactor auto-minimises Gibbs energy with no
+    # reaction stoichiometry / Kp config required — more reliable numerically.
+    "biogas_smr_h2_gibbs": {
+        "category": "renewables",
+        "description": (
+            "Hydrogen production from biogas via SMR. Same as biogas_smr_h2 but "
+            "REF-101 uses GibbsReactor (auto Gibbs minimisation, no Kp needed). "
+            "Reproduces Ullah, Asaad & Inayat (2025) Digital Chem Eng 14:100205."
+        ),
+        # ── Blueprint §"Adaptation hints" — fields the LLM uses to adapt, not parrot
+        "meta": {
+            "reference": (
+                "Ullah, K., Asaad, S.M., Inayat, A. (2025). 'Process modelling and "
+                "optimization of hydrogen production from biogas by integrating "
+                "DWSIM with response surface methodology.' "
+                "Digital Chemical Engineering 14:100205. "
+                "https://doi.org/10.1016/j.dche.2024.100205"
+            ),
+            "operating_regime": {
+                "reformer_T_C": [750, 950],
+                "system_P_bar": [8, 30],
+                "steam_to_carbon": [1.5, 3.5],
+                "property_package": "Peng-Robinson (PR)",
+                "why_property_package": (
+                    "Mostly non-polar gas mixture (CH4, CO2, H2O, H2, CO, N2) at "
+                    "16 bar. PR handles non-ideality of CO2 and steam adequately. "
+                    "NRTL/UNIQUAC are for liquid-phase polar systems — wrong here. "
+                    "SteamTables is not applicable: not pure water/steam."
+                ),
+            },
+            "rationale_per_unit": {
+                "COMP-101": (
+                    "Biogas compression 1→16 bar. η_adiabatic=0.75 is standard for "
+                    "industrial centrifugal compressors at this scale."
+                ),
+                "B-101 / P-101": (
+                    "Steam generator. Pump water to 16 bar (cheap) then heat to 909°C "
+                    "in a fired boiler (expensive). Steam-to-carbon ratio fixed by "
+                    "water mass-flow ratio to biogas — 46/38.5 = 1.19 gives S/C ≈ 2.5."
+                ),
+                "REF-101": (
+                    "Gibbs reactor at 909°C. Auto-minimises Gibbs energy across SMR "
+                    "(CH4 + H2O ⇌ CO + 3H2) AND dry reforming (CH4 + CO2 ⇌ 2CO + 2H2). "
+                    "GibbsReactor is preferred over EquilibriumReactor here: no Kp "
+                    "configuration, no risk of stoichiometry typos. 909°C is the "
+                    "RSM-optimum from Ullah 2025; lower T leaves CH4 unconverted."
+                ),
+                "HTS-101 / LTS-101": (
+                    "Two-stage WGS: HTS at 350→430°C (Fe-Cr cat, 75% CO conv) then "
+                    "intercool to 210°C, LTS at 210→250°C (Cu-Zn cat, 85% CO conv). "
+                    "Two stages because WGS equilibrium is more favourable at lower T "
+                    "but kinetics are too slow below ~200°C — split the duty."
+                ),
+                "COND-101": (
+                    "Flash at 38°C condenses unreacted steam to liquid. Essential "
+                    "upstream of PSA: zeolite beds are destroyed by liquid water."
+                ),
+                "PSA-101": (
+                    "CompoundSeparator with 79% H2 recovery is a steady-state surrogate "
+                    "for a cyclic PSA. Real plants achieve 75-85% H2 recovery at "
+                    ">99.9% purity. Tail gas (CO2, CO, CH4 + ~21% lost H2) goes to "
+                    "the burner."
+                ),
+                "COMB-101": (
+                    "Tail-gas combustor closes the energy loop: the LHV of recovered "
+                    "fuel components provides ~60-70% of the reformer duty."
+                ),
+            },
+            "sensitivity": {
+                "T_reformer_C": (
+                    "Above 850°C the curve flattens (Le Chatelier limit). "
+                    "Below 800°C CH4 conversion drops sharply (<92%). "
+                    "Above 950°C the heat duty escalates with diminishing H2 returns."
+                ),
+                "system_P_bar": (
+                    "Lower P favours SMR (4 moles out vs 2 in). But low P balloons "
+                    "equipment size and compresses downstream PSA inefficiency. "
+                    "16 bar is the industrial compromise."
+                ),
+                "steam_to_carbon": (
+                    "Minimum 1.5 to prevent carbon deposition (Boudouard reaction). "
+                    "Above 3.0 utility cost rises with diminishing H2 yield. "
+                    "2.5 is the sweet spot."
+                ),
+            },
+            "known_failure_modes": [
+                "GibbsReactor fails to converge if feed T < 700°C (equilibrium barely "
+                "shifts at low T). Always pre-heat to ≥850°C.",
+                "CompoundSeparator (PSA-101) needs TWO outlet streams (HYDROGEN + "
+                "TAIL-GAS) and a separation dict {'Hydrogen': 0.79}.",
+                "Composition issues: mole fractions in BIOGAS-IN must sum to 1.0. "
+                "Always use set_stream_composition, not raw set_stream_property.",
+                "COND-101 (Vessel) needs both vapor (PSA-F) and liquid (CONDENSATE) "
+                "outlets connected — omitting CONDENSATE leaves water in the PSA feed.",
+                "Tail-gas combustor (COMB-101) needs 3 oxidation reactions configured "
+                "(CH4, CO, H2 combustion) — otherwise solver hangs.",
+            ],
+            "variations": [
+                {
+                    "name": "Higher H2 production",
+                    "delta": "Increase biogas mass_flow proportionally; keep S/C=2.5 by "
+                             "raising water_mass_flow with the same ratio (1.19).",
+                },
+                {
+                    "name": "Higher H2 purity",
+                    "delta": "Raise PSA recovery toward 0.85 (typical industrial max) "
+                             "OR add an additional PSA stage downstream.",
+                },
+                {
+                    "name": "Lower-pressure variant",
+                    "delta": "Drop COMP-101 to 8 bar and match all unit P. Increases "
+                             "H2 yield slightly but balloons equipment size.",
+                },
+                {
+                    "name": "Pure CH4 feed (natural gas SMR, not biogas)",
+                    "delta": "BIOGAS-IN composition becomes {CH4: 1.0}. Remove the dry "
+                             "reforming pathway; only steam reforming + WGS apply.",
+                },
+            ],
+            "intent_template": {
+                "feed_streams": ["BIOGAS-IN", "WATER-IN"],
+                "product_streams": ["HYDROGEN"],
+                "note": "Biogas-to-H2 via SMR + 2-stage WGS + PSA",
+                "targets": [
+                    {"kind": "product_purity", "stream_tag": "HYDROGEN",
+                     "compound": "Hydrogen", "expected": 0.99},
+                    {"kind": "max_impurity",   "stream_tag": "HYDROGEN",
+                     "compound": "Carbon monoxide", "expected": 0.001},
+                    {"kind": "unit_setpoint",  "unit_tag": "H-101",
+                     "property_name": "OutletTemperature",
+                     "expected": 1182.15, "tolerance": 5.0},
+                ],
+            },
+        },
+        "topology": {
+            "name": "biogas_smr_h2_gibbs",
+            "property_package": "Peng-Robinson (PR)",
+            "compounds": [
+                "Methane", "Carbon dioxide", "Water", "Hydrogen",
+                "Carbon monoxide", "Nitrogen", "Oxygen",
+            ],
+            "streams": [
+                _s("BIOGAS-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=38.5, flow_unit="kg/h",
+                   compositions={"Methane": 0.5997, "Carbon dioxide": 0.4006,
+                                 "Nitrogen": 0.0002, "Oxygen": 0.0004,
+                                 "Water": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0}),
+                _s("BIOGAS-COMP"), _s("BIOGAS-HOT"),
+                _s("WATER-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=46.0, flow_unit="kg/h",
+                   compositions={"Water": 1.0, "Methane": 0.0,
+                                 "Carbon dioxide": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0,
+                                 "Nitrogen": 0.0, "Oxygen": 0.0}),
+                _s("STEAM"), _s("REF-F"), _s("REF-P"),
+                _s("HTS-F"), _s("HTS-P"), _s("LTS-F"), _s("LTS-P"),
+                _s("COND-F"), _s("PSA-F"), _s("CONDENSATE"),
+                _s("HYDROGEN"), _s("TAIL-GAS"), _s("TAIL-LP"),
+                _s("AIR-IN", T=25, T_unit="C", P=1, P_unit="bar",
+                   mass_flow=80.0, flow_unit="kg/h",
+                   compositions={"Oxygen": 0.21, "Nitrogen": 0.79,
+                                 "Methane": 0.0, "Carbon dioxide": 0.0,
+                                 "Water": 0.0, "Hydrogen": 0.0,
+                                 "Carbon monoxide": 0.0}),
+                _s("COMB-F"), _s("FLUE-HOT"), _s("FLUE-OUT"),
+                _e("Q-COMP"), _e("Q-HEAT"), _e("Q-PUMP"), _e("Q-BOIL"),
+                _e("Q-REF"),  _e("Q-HTS"),  _e("Q-LTS"),
+                _e("Q-HRE1"), _e("Q-HRE2"), _e("Q-HRE3"), _e("Q-HRE4"),
+                _e("Q-PRE"),  _e("Q-COMB"),
+            ],
+            "unit_ops": [
+                _u("COMP-101", "Compressor",       outlet_pressure_bar=16.0,
+                   adiabatic_efficiency=0.75),
+                _u("H-101",    "Heater",            outlet_temperature_C=909.0,
+                   delta_p_bar=0.0),
+                _u("P-101",    "Pump",              outlet_pressure_bar=16.0,
+                   adiabatic_efficiency=0.75),
+                _u("B-101",    "Heater",            outlet_temperature_C=909.0,
+                   delta_p_bar=0.0),
+                _u("MIX-101",  "Mixer"),
+                # Gibbs reactor: minimises Gibbs energy at 909°C (handles both SMR and dry reforming)
+                _u("REF-101",  "GibbsReactor"),
+                _u("HRE-1",    "Cooler",            outlet_temperature_C=350.0,
+                   delta_p_bar=0.0),
+                _u("HTS-101",  "ConversionReactor", conversion=0.75),
+                _u("HRE-2",    "Cooler",            outlet_temperature_C=210.0,
+                   delta_p_bar=0.05),
+                # LTS: 85% WGS conversion at 210-250°C (Ullah 2025)
+                _u("LTS-101",  "ConversionReactor", conversion=0.85),
+                _u("HRE-3",    "Cooler",            outlet_temperature_C=38.0,
+                   delta_p_bar=0.05),
+                _u("COND-101", "Vessel"),
+                _u("PSA-101",  "CompoundSeparator",
+                   separation={"Hydrogen": 0.79}),
+                _u("VLV-101",  "Valve",             outlet_pressure_bar=1.0),
+                _u("MIX-102",  "Mixer"),
+                _u("PRE-HEAT", "Heater",            outlet_temperature_C=250.0,
+                   delta_p_bar=0.0),
+                _u("COMB-101", "ConversionReactor", conversion=0.99),
+                _u("HRE-4",    "Cooler",            outlet_temperature_C=200.0,
+                   delta_p_bar=0.0),
+            ],
+            "connections": [
+                _c("BIOGAS-IN",   "COMP-101",    0, 0),
+                _c("Q-COMP",      "COMP-101",    0, 1),
+                _c("COMP-101",    "BIOGAS-COMP", 0, 0),
+                _c("BIOGAS-COMP", "H-101",       0, 0),
+                _c("Q-HEAT",      "H-101",       0, 1),
+                _c("H-101",       "BIOGAS-HOT",  0, 0),
+                _c("WATER-IN",    "P-101",       0, 0),
+                _c("Q-PUMP",      "P-101",       0, 1),
+                _c("P-101",       "B-101",       0, 0),
+                _c("Q-BOIL",      "B-101",       0, 1),
+                _c("B-101",       "STEAM",       0, 0),
+                _c("BIOGAS-HOT",  "MIX-101",    0, 0),
+                _c("STEAM",       "MIX-101",    0, 1),
+                _c("MIX-101",     "REF-F",      0, 0),
+                _c("REF-F",       "REF-101",    0, 0),
+                _c("Q-REF",       "REF-101",    0, 1),
+                _c("REF-101",     "REF-P",      0, 0),
+                _c("REF-P",       "HRE-1",      0, 0),
+                _c("Q-HRE1",      "HRE-1",      0, 1),
+                _c("HRE-1",       "HTS-F",      0, 0),
+                _c("HTS-F",       "HTS-101",    0, 0),
+                _c("Q-HTS",       "HTS-101",    0, 1),
+                _c("HTS-101",     "HTS-P",      0, 0),
+                _c("HTS-P",       "HRE-2",      0, 0),
+                _c("Q-HRE2",      "HRE-2",      0, 1),
+                _c("HRE-2",       "LTS-F",      0, 0),
+                _c("LTS-F",       "LTS-101",    0, 0),
+                _c("Q-LTS",       "LTS-101",    0, 1),
+                _c("LTS-101",     "LTS-P",      0, 0),
+                _c("LTS-P",       "HRE-3",      0, 0),
+                _c("Q-HRE3",      "HRE-3",      0, 1),
+                _c("HRE-3",       "COND-F",     0, 0),
+                _c("COND-F",      "COND-101",   0, 0),
+                _c("COND-101",    "PSA-F",      0, 0),
+                _c("COND-101",    "CONDENSATE", 1, 0),
+                _c("PSA-F",       "PSA-101",    0, 0),
+                _c("PSA-101",     "HYDROGEN",   0, 0),
+                _c("PSA-101",     "TAIL-GAS",   1, 0),
+                _c("TAIL-GAS",    "VLV-101",    0, 0),
+                _c("VLV-101",     "TAIL-LP",    0, 0),
+                _c("TAIL-LP",     "MIX-102",    0, 0),
+                _c("AIR-IN",      "MIX-102",    0, 1),
+                _c("MIX-102",     "COMB-F",     0, 0),
+                _c("COMB-F",      "PRE-HEAT",   0, 0),
+                _c("Q-PRE",       "PRE-HEAT",   0, 1),
+                _c("PRE-HEAT",    "COMB-101",   0, 0),
+                _c("Q-COMB",      "COMB-101",   0, 1),
+                _c("COMB-101",    "FLUE-HOT",   0, 0),
+                _c("FLUE-HOT",    "HRE-4",      0, 0),
+                _c("Q-HRE4",      "HRE-4",      0, 1),
+                _c("HRE-4",       "FLUE-OUT",   0, 0),
+            ],
         },
     },
 
@@ -588,6 +857,19 @@ def get_template(name: str) -> Optional[Dict[str, Any]]:
     if not tpl:
         return None
     return deepcopy(tpl["topology"])
+
+
+def get_template_meta(name: str) -> Optional[Dict[str, Any]]:
+    """Return the meta block (rationale, sensitivity, known_failure_modes,
+    variations, intent_template) for a template, or None.
+
+    Per blueprint §"Adaptation hints" — these fields turn a template from
+    a copy-paste artifact into something the LLM can adapt."""
+    tpl = TEMPLATES.get(name)
+    if not tpl:
+        return None
+    meta = tpl.get("meta")
+    return deepcopy(meta) if meta else None
 
 
 def render_template(name: str,

@@ -217,17 +217,6 @@ def probe_llm_providers(timeout_s: float = 4.0) -> Dict[str, Any]:
         results["anthropic"] = {"reachable": False, "key_configured": False,
                                 "error": "ANTHROPIC_API_KEY not set"}
 
-    # Gemini
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if _has("GEMINI_API_KEY"):
-        results["gemini"] = _probe(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
-            {})
-        results["gemini"]["key_configured"] = True
-    else:
-        results["gemini"] = {"reachable": False, "key_configured": False,
-                             "error": "GEMINI_API_KEY not set"}
-
     # Ollama — localhost only
     results["ollama"] = _probe("http://localhost:11434/api/tags", {})
     results["ollama"]["key_configured"] = None  # N/A
@@ -239,7 +228,7 @@ def probe_llm_providers(timeout_s: float = 4.0) -> Dict[str, Any]:
 # Ordered fallback chain — uses reachability data to pick primary + alternates
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PROVIDER_PREFERENCE = ("groq", "openai", "anthropic", "gemini", "ollama")
+_PROVIDER_PREFERENCE = ("groq", "openai", "anthropic", "ollama")
 
 
 def recommended_provider_order(probe: Dict[str, Any]) -> List[str]:

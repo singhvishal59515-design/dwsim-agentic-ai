@@ -842,6 +842,168 @@ def validate_topology(topology: Dict) -> List[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Energy-stream completeness
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Unit-op types that REQUIRE an energy stream wired to an energy connector, and
+# the input-port index that connector lives on. The convention is proven by
+# flowsheet_templates.py, where every one of these is wired as _c("Q", U, 0, 1):
+# a single duty connector at input-port index 1.
+_ENERGY_INPUT_PORT = {
+    "Heater":     1,
+    "Cooler":     1,
+    "Pump":       1,
+    "Compressor": 1,
+    "Expander":   1,
+    "Turbine":    1,
+}
+
+
+def plan_energy_injections(unit_ops, connections, energy_stream_tags,
+                           existing_tags):
+    """Decide which energy streams are missing — pure, no side effects.
+
+    Returns a list of ``(energy_stream_tag, unit_op_tag, energy_port)`` triples.
+    Shared by both build paths (topology builder and step-wise executor) so the
+    rule "every Heater/Cooler/Pump/Compressor/Expander needs a duty connector"
+    is enforced identically. No-op for a unit whose energy connector is already
+    wired, so template-built flowsheets are unaffected.
+
+    Connections are read tolerantly: ``from``/``source`` and ``to``/``target``
+    are both accepted (the two paths use different key names).
+    """
+    injections: List[Tuple[str, str, int]] = []
+    taken = set(existing_tags)
+    estags = set(energy_stream_tags)
+    for uo in unit_ops:
+        if not isinstance(uo, dict):
+            continue
+        enum_name = _resolve_type(uo.get("type", "")) or ""
+        port = _ENERGY_INPUT_PORT.get(enum_name)
+        if port is None:
+            continue
+        uo_tag = uo.get("tag", "")
+        if not uo_tag:
+            continue
+        # Already wired if anything reaches this unit's energy port, OR any
+        # declared energy stream connects into it (covers a different port no.).
+        has_energy = any(
+            (c.get("to") or c.get("target")) == uo_tag and (
+                int(c.get("to_port", 0) or 0) == port
+                or (c.get("from") or c.get("source")) in estags)
+            for c in connections if isinstance(c, dict)
+        )
+        if has_energy:
+            continue
+        base = f"Q-{uo_tag}"
+        q_tag, i = base, 2
+        while q_tag in taken:
+            q_tag = f"{base}-{i}"
+            i += 1
+        taken.add(q_tag)
+        estags.add(q_tag)
+        injections.append((q_tag, uo_tag, port))
+    return injections
+
+
+def _inject_recycle_blocks(streams, unit_ops, connections, warnings):
+    """Tear every untorn recycle loop with an OT_Recycle block.
+
+    A sequential-modular solver (DWSIM) cannot converge an unbroken algebraic
+    loop. The LLM free-build path frequently connects a downstream stream back
+    to an upstream unit WITHOUT a recycle block, leaving the loop untorn. This
+    detects such loops (networkx) and splices in an OT_Recycle block on a tear
+    edge — the same topology the reactor_recycle template uses:
+
+        tear_stream → [OT_Recycle] → new_stream → consumer(loop-close)
+
+    Guarantees the loop is STRUCTURALLY solvable. No-op when networkx is absent,
+    when there are no cycles, or when a loop already has a recycle block (so
+    templates and correct builds are untouched). Mutates and returns the lists.
+    """
+    try:
+        from recycle_analyzer import plan_recycle_insertions
+    except Exception:
+        return streams, unit_ops, connections
+
+    try:
+        plans = plan_recycle_insertions(streams, unit_ops, connections)
+    except Exception as exc:
+        _log = __import__("logging").getLogger("flowsheet_builder")
+        _log.debug("recycle planning failed: %s", exc)
+        return streams, unit_ops, connections
+
+    for p in plans:
+        tear, consumer = p["tear_stream"], p["consumer"]
+        rec_tag, new_stream = p["rec_tag"], p["new_stream_tag"]
+        port = int(p.get("consumer_port", 0) or 0)
+
+        # Drop the direct tear_stream → consumer edge…
+        connections[:] = [c for c in connections
+                          if not (isinstance(c, dict)
+                                  and (c.get("from") or c.get("source")) == tear
+                                  and (c.get("to") or c.get("target")) == consumer)]
+        # …and reroute through the recycle block.
+        unit_ops.append({"tag": rec_tag, "type": "Recycle",
+                        "max_iterations": 50, "tolerance": 1e-4})
+        # Seed the new tear stream with a physical initial guess (T/P/composition)
+        # copied from the seed source — DWSIM's recycle iteration converges far
+        # more reliably from a seeded guess than from a blank stream.
+        new_spec = {"tag": new_stream, "type": "MaterialStream"}
+        src_tag = p.get("seed_from")
+        if src_tag:
+            src = next((s for s in streams if isinstance(s, dict)
+                        and s.get("tag") == src_tag), {})
+            for kk in ("T", "T_unit", "P", "P_unit", "compositions"):
+                if kk in src:
+                    new_spec[kk] = src[kk]
+        streams.append(new_spec)
+        connections.append({"from": tear, "to": rec_tag,
+                            "from_port": 0, "to_port": 0})
+        connections.append({"from": rec_tag, "to": new_stream,
+                            "from_port": 0, "to_port": 0})
+        connections.append({"from": new_stream, "to": consumer,
+                            "from_port": 0, "to_port": port})
+        warnings.append(
+            f"Auto-inserted recycle block {rec_tag!r} to tear the loop at "
+            f"{tear!r}→{consumer!r} (an untorn recycle cannot converge in a "
+            f"sequential-modular solver)")
+
+    return streams, unit_ops, connections
+
+
+def _inject_missing_energy_streams(streams, unit_ops, connections, warnings):
+    """Make the free-build path as complete as the template path.
+
+    A Heater / Cooler / Pump / Compressor / Expander created without an energy
+    stream on its duty port is under-specified: DWSIM cannot compute or report
+    its duty and the flowsheet will not fully converge. The LLM free-build path
+    trusts the model to remember that connection, and it does not always. This
+    synthesises the missing EnergyStream + connection so the unit always ends up
+    solvable, regardless of what the model emitted.
+
+    Mutates and returns the three topology lists.
+    """
+    energy_stream_tags = {
+        s.get("tag", "") for s in streams
+        if (_resolve_type(s.get("type", "")) or "") == "EnergyStream"
+    }
+    existing_tags = ({s.get("tag", "") for s in streams}
+                     | {u.get("tag", "") for u in unit_ops})
+
+    for q_tag, uo_tag, port in plan_energy_injections(
+            unit_ops, connections, energy_stream_tags, existing_tags):
+        streams.append({"tag": q_tag, "type": "EnergyStream"})
+        connections.append({"from": q_tag, "to": uo_tag,
+                            "from_port": 0, "to_port": port})
+        warnings.append(
+            f"Auto-added energy stream {q_tag!r} to {uo_tag!r} "
+            f"(requires an energy connector to compute its duty)")
+
+    return streams, unit_ops, connections
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main builder function
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -993,6 +1155,19 @@ def build_flowsheet(mgr, topology: Dict) -> Dict[str, Any]:
     streams  = topology.get("streams", [])
     unit_ops = topology.get("unit_ops", [])
     connections = topology.get("connections", [])
+
+    # Tear any untorn recycle loop with an OT_Recycle block first — an unbroken
+    # algebraic loop cannot converge in DWSIM's sequential-modular solver. This
+    # adds units/streams, so it must run before the energy pass and layout.
+    streams, unit_ops, connections = _inject_recycle_blocks(
+        streams, unit_ops, connections, warnings)
+
+    # Ensure every energy-requiring unit op has its duty connector before we lay
+    # out and connect — closes the "Heater created without an energy stream" gap
+    # so the free-build path always yields a solvable unit (matches templates).
+    streams, unit_ops, connections = _inject_missing_energy_streams(
+        streams, unit_ops, connections, warnings)
+
     positions = _compute_layout(streams, unit_ops, connections)
 
     # ── 6. Create streams ────────────────────────────────────────────────────

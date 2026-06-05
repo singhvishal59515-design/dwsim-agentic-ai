@@ -32,6 +32,15 @@ import urllib.error
 from datetime import datetime
 from typing import Dict, List, Optional
 
+# Windows consoles default to cp1252, which has no glyphs for the ✓/✗/~/⚠ status
+# symbols — printing them raised UnicodeEncodeError and aborted the whole run.
+# Force UTF-8 (replace on any unmappable char) so the runner never dies on I/O.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ── Config ────────────────────────────────────────────────────────────────────
 SERVER_URL  = os.getenv("BENCHMARK_SERVER", "http://localhost:8080")
 API_KEY     = os.getenv("API_SECRET_KEY", "")
@@ -151,17 +160,63 @@ def _get_stream_results() -> dict:
     return r if r.get("success") else {}
 
 
+def _stream_value(stream: dict, prop: str):
+    """Read a criterion property from a /flowsheet/results stream record,
+    mapping the criteria's friendly C/bar/kg-h names onto the SI keys the API
+    actually returns (temperature_K, pressure_Pa, mass_flow_kg_s, …). Without
+    this every quantitative criterion read None and the whole suite scored 0%."""
+    if prop in stream:
+        return stream[prop]
+
+    def g(k):
+        v = stream.get(k)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    p = prop.lower()
+    T = g("temperature_K"); P = g("pressure_Pa")
+    mf = g("mass_flow_kg_s"); nf = g("molar_flow_mol_s")
+    table = {
+        "temperature_c": (None if T is None else T - 273.15),
+        "temperature":   T, "temperature_k": T,
+        "pressure_bar":  (None if P is None else P / 1e5),
+        "pressure_atm":  (None if P is None else P / 101325.0),
+        "pressure_kpa":  (None if P is None else P / 1e3),
+        "pressure":      P, "pressure_pa": P,
+        "mass_flow_kgh": (None if mf is None else mf * 3600.0),
+        "mass_flow_kg_h":(None if mf is None else mf * 3600.0),
+        "mass_flow":     mf, "mass_flow_kg_s": mf,
+        "molar_flow_kmolh": (None if nf is None else nf * 3.6),
+        "molar_flow":    nf, "molar_flow_mol_s": nf,
+    }
+    if p in table:
+        return table[p]
+    # composition / mole-fraction style: try a few shapes
+    comp = stream.get("composition") or stream.get("compositions") or {}
+    if isinstance(comp, dict):
+        for key in (prop, prop.split("_")[-1]):
+            if key in comp:
+                return comp[key]
+    return None
+
+
 def _evaluate_criterion(criterion: SuccessCriterion, stream_results: dict) -> bool:
     """
     Check a single SuccessCriterion against the live simulation results.
     Returns True if the criterion is met within tolerance.
     """
-    streams = stream_results.get("streams", {})
-    if criterion.stream_tag not in streams:
+    # Results arrive as the full /flowsheet/results dict ({stream_results: {...}})
+    # OR an already-tag-keyed mapping (in-process path). Handle both.
+    streams = (stream_results.get("stream_results")
+               or stream_results.get("streams")
+               or stream_results)
+    if not isinstance(streams, dict) or criterion.stream_tag not in streams:
         return False
 
     s   = streams[criterion.stream_tag]
-    val = s.get(criterion.property)
+    val = _stream_value(s, criterion.property) if isinstance(s, dict) else None
     if val is None:
         return False
 
@@ -174,7 +229,7 @@ def _evaluate_criterion(criterion: SuccessCriterion, stream_results: dict) -> bo
     tol = criterion.tolerance_pct / 100.0
 
     op = criterion.operator
-    if op == "==":
+    if op in ("==", "~="):
         return abs(val - target) <= abs(target) * tol if target != 0 else abs(val) <= tol
     elif op == ">":
         return val > target * (1 - tol)
