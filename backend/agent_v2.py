@@ -2515,13 +2515,14 @@ class DWSIMAgentV2:
         "get_energy_stream", "get_transport_properties",
         "calculate_phase_envelope", "get_binary_interaction_parameters",
         "parametric_study", "parametric_study_2d",
-        "optimize_parameter", "optimize_multivar",
-        "optimize_constrained", "optimize_multiobjective",
-        "global_sensitivity", "optimize_eo",
-        "bayesian_optimize", "monte_carlo_study",
-        # NL-driven autonomous optimization workflow + DWSIM-native variant
+        "optimize_parameter",
+        # NL-driven autonomous optimization workflow + DWSIM-native variant.
+        # These two ROUTERS stay always-available so any optimisation request
+        # can start; the heavy specialised optimisers (_TOOLS_OPTIMIZE_HEAVY)
+        # are gated behind optimisation-intent keywords to keep the per-call
+        # payload small (they are the largest tool schemas and were sent on
+        # EVERY analyse/report turn, ~2.7k tokens of dead weight).
         "optimize_flowsheet_with_llm", "dwsim_optimize",
-        "dwsim_internal_optimize",
         # Escape-hatch reflection tools (always available — universal access)
         "reflect_get_set", "exec_python", "inspect_object",
         "iterative_spec_loop",
@@ -2552,6 +2553,17 @@ class DWSIMAgentV2:
         "declare_intent",
     }
 
+    # Heavy specialised optimisers — the largest tool schemas. Gated OUT of the
+    # base analyse set and added back only when the user's message shows
+    # optimisation intent (see the 'optim'/'minim'/'maxim'/… keyword boosts).
+    # Routers (optimize_flowsheet_with_llm, dwsim_optimize) stay always-available
+    # so a plain "optimise this" never lacks an entry point.
+    _TOOLS_OPTIMIZE_HEAVY = {
+        "optimize_multivar", "optimize_constrained", "optimize_multiobjective",
+        "global_sensitivity", "optimize_eo", "bayesian_optimize",
+        "monte_carlo_study", "dwsim_internal_optimize",
+    }
+
     # Per-intent keyword tool boosts. When user's message contains these
     # keywords, force-include the related tools (overrides phase pruning).
     _TOOLS_INTENT_KEYWORDS = {
@@ -2578,23 +2590,31 @@ class DWSIMAgentV2:
         "diagram":      {"generate_pfd"},
         "monte":        {"monte_carlo_study"},
         "bayes":        {"bayesian_optimize"},
-        "optim":        {"optimize_flowsheet_with_llm", "optimize_parameter",
-                         "optimize_multivar", "optimize_constrained",
-                         "optimize_eo", "optimize_multiobjective",
-                         "bayesian_optimize", "dwsim_optimize"},
+        # Any explicit optimisation intent unlocks the FULL specialised toolkit.
+        "optim":        _TOOLS_OPTIMIZE_HEAVY | {"optimize_flowsheet_with_llm",
+                         "optimize_parameter", "dwsim_optimize"},
         "sensitiv":     {"global_sensitivity", "parametric_study",
                          "parametric_study_2d"},
         "pareto":       {"optimize_multiobjective"},
         "trade-off":    {"optimize_multiobjective"},
         "equation-orient": {"optimize_eo"},
-        "maximi":       {"optimize_flowsheet_with_llm", "dwsim_optimize",
-                         "bayesian_optimize"},
-        "maximise":     {"optimize_flowsheet_with_llm", "dwsim_optimize"},
-        "minimi":       {"optimize_flowsheet_with_llm", "dwsim_optimize",
-                         "bayesian_optimize"},
-        "minimise":     {"optimize_flowsheet_with_llm", "dwsim_optimize"},
-        "improve":      {"optimize_flowsheet_with_llm"},
-        "best operating": {"optimize_flowsheet_with_llm"},
+        "maximi":       _TOOLS_OPTIMIZE_HEAVY | {"optimize_flowsheet_with_llm",
+                         "dwsim_optimize", "optimize_parameter"},
+        "maximise":     _TOOLS_OPTIMIZE_HEAVY | {"optimize_flowsheet_with_llm",
+                         "dwsim_optimize", "optimize_parameter"},
+        "minimi":       _TOOLS_OPTIMIZE_HEAVY | {"optimize_flowsheet_with_llm",
+                         "dwsim_optimize", "optimize_parameter"},
+        "minimise":     _TOOLS_OPTIMIZE_HEAVY | {"optimize_flowsheet_with_llm",
+                         "dwsim_optimize", "optimize_parameter"},
+        # Lighter phrasings that still imply an objective — surface the routers
+        # (the routers then dispatch to the right specialised solver).
+        "reduce":       {"optimize_flowsheet_with_llm", "dwsim_optimize",
+                         "optimize_parameter"},
+        "lower the":    {"optimize_flowsheet_with_llm", "dwsim_optimize"},
+        "highest":      {"optimize_flowsheet_with_llm", "dwsim_optimize"},
+        "lowest":       {"optimize_flowsheet_with_llm", "dwsim_optimize"},
+        "improve":      {"optimize_flowsheet_with_llm", "dwsim_optimize"},
+        "best operating": {"optimize_flowsheet_with_llm", "dwsim_optimize"},
         "yield":        {"optimize_flowsheet_with_llm", "dwsim_optimize"},
         "purity":       {"optimize_flowsheet_with_llm", "dwsim_optimize"},
         "report":       {"generate_report"},
@@ -2944,31 +2964,34 @@ class DWSIMAgentV2:
         except Exception:
             return "build"
 
+    @classmethod
+    def _active_tool_names(cls, phase: str, user_message: str) -> set:
+        """Pure tool-selection logic: phase subset + always-on + intent-keyword
+        boosts. Separated from _select_active_tools so it is unit-testable
+        without a live bridge/LLM (verifies that gating the heavy optimisers
+        out of the base set never strands an optimisation request)."""
+        allowed = {
+            "discovery": cls._TOOLS_DISCOVERY,
+            "build":     cls._TOOLS_BUILD | cls._TOOLS_SOLVE,
+            "solve":     cls._TOOLS_SOLVE | cls._TOOLS_ANALYZE,
+            "analyze":   cls._TOOLS_ANALYZE | cls._TOOLS_BUILD,
+        }.get(phase, set())
+        allowed = allowed | cls._TOOLS_ALWAYS
+        um = (user_message or "").lower()
+        for keyword, extra in cls._TOOLS_INTENT_KEYWORDS.items():
+            if keyword in um:
+                allowed = allowed | extra
+        return allowed
+
     def _select_active_tools(self, all_tools: list) -> list:
         """Return only the tools relevant to the current agent phase.
         Falls back to all_tools on any inspection error so behaviour never
         degrades to "no tools available"."""
         try:
             phase = self._detect_phase()
-            allowed = {
-                "discovery": self._TOOLS_DISCOVERY,
-                "build":     self._TOOLS_BUILD | self._TOOLS_SOLVE,
-                "solve":     self._TOOLS_SOLVE | self._TOOLS_ANALYZE,
-                "analyze":   self._TOOLS_ANALYZE | self._TOOLS_BUILD,
-            }.get(phase, set())
-            allowed = allowed | self._TOOLS_ALWAYS
-
-            # Intent-keyword boost: force-include tools whose category the
-            # user's current message hints at. Prevents pruning out tools the
-            # user explicitly asks about (e.g. "synthesize HEN" but solver in
-            # build phase). Reads _turn_user_message set by chat().
-            try:
-                um = (getattr(self, "_turn_user_message", "") or "").lower()
-                for keyword, extra in self._TOOLS_INTENT_KEYWORDS.items():
-                    if keyword in um:
-                        allowed = allowed | extra
-            except Exception:
-                pass
+            # Intent-keyword boost reads _turn_user_message set by chat().
+            allowed = self._active_tool_names(
+                phase, getattr(self, "_turn_user_message", "") or "")
 
             if not allowed:
                 return all_tools
