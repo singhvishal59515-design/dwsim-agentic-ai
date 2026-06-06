@@ -1225,6 +1225,84 @@ def _run_multistart(run_fn, spec: Dict[str, Any], n_starts: int,
     return best
 
 
+def _assess_global_confidence(run_fn, spec, reported_result, minimize, emit):
+    """Probe global-optimality CONFIDENCE by re-optimising from a few diverse
+    starts. You cannot PROVE a black-box nonconvex optimum is global, but if
+    several independent restarts converge to the same value, that is strong
+    evidence; if one finds a better value, the reported optimum was NOT global
+    (and we adopt the better one).
+
+    Returns (block, adopt_result):
+      block        — {assessed, confidence('high'|'medium'|'low'|'unknown'),
+                      n_probes, n_agree, best_found, reported, improved, note}
+      adopt_result — a strictly-better optimisation result to use instead, or None.
+
+    Bounded + cost-gated (env OPT_GLOBAL_CONFIDENCE / _PROBES / _MAX_S / _TOL) so
+    cheap flowsheets pay a little and expensive ones are skipped.
+    """
+    if os.getenv("OPT_GLOBAL_CONFIDENCE", "1") == "0":
+        return {"assessed": False, "reason": "disabled"}, None
+    reported = reported_result.get("best_objective")
+    variables = spec.get("variables", [])
+    if reported is None or not variables:
+        return {"assessed": False, "reason": "no reported optimum / variables"}, None
+    reported = float(reported)
+
+    n_probes = max(1, int(os.getenv("OPT_GLOBAL_CONFIDENCE_PROBES", "3")))
+    rel_tol = float(os.getenv("OPT_GLOBAL_CONFIDENCE_TOL", "0.02"))
+    dur = (reported_result.get("duration_s")
+           or reported_result.get("elapsed_s") or 0) or 0
+    if dur and dur * n_probes > float(os.getenv("OPT_GLOBAL_CONFIDENCE_MAX_S", "60")):
+        return {"assessed": False,
+                "reason": f"skipped — too expensive (~{dur:.1f}s/run)"}, None
+
+    objs, best_probe_obj, best_probe_res = [], None, None
+    for k, start in enumerate(_sample_starts(variables, n_probes)):
+        emit("🌐 global-check",
+             f"probe {k + 1}/{n_probes} — re-optimising from a diverse start…")
+        r = run_fn(_spec_with_start(spec, start))
+        if isinstance(r, dict) and r.get("success") and r.get("best_objective") is not None:
+            o = float(r["best_objective"])
+            objs.append(o)
+            if best_probe_obj is None or (o < best_probe_obj if minimize else o > best_probe_obj):
+                best_probe_obj, best_probe_res = o, r
+
+    if not objs:
+        return {"assessed": True, "confidence": "unknown",
+                "note": "global-confidence probes did not converge."}, None
+
+    denom = max(abs(reported), 1e-9)
+    n_agree = sum(1 for o in objs if abs(o - reported) / denom <= rel_tol)
+    best_found = min(objs + [reported]) if minimize else max(objs + [reported])
+    improved = ((best_probe_obj is not None)
+                and (abs(best_probe_obj - reported) / denom > rel_tol)
+                and ((best_probe_obj < reported) if minimize else (best_probe_obj > reported)))
+
+    adopt = best_probe_res if improved else None
+    if improved:
+        conf = "low"
+        note = (f"a diverse restart found a BETTER optimum "
+                f"({best_probe_obj:.4g} vs {reported:.4g}) — the first optimum was "
+                f"NOT global; adopting the better one.")
+    elif n_agree == len(objs):
+        conf = "high"
+        note = (f"all {len(objs)} independent restarts converged to the same "
+                f"optimum (±{rel_tol*100:.0f}%) — strong evidence it is global.")
+    elif n_agree >= max(1, len(objs) // 2):
+        conf = "medium"
+        note = (f"{n_agree}/{len(objs)} restarts agree; the rest reached other "
+                f"local optima — the surface is multimodal.")
+    else:
+        conf = "low"
+        note = (f"only {n_agree}/{len(objs)} restarts agree — multiple local "
+                f"optima; the reported value may not be global.")
+
+    return ({"assessed": True, "confidence": conf, "n_probes": len(objs),
+             "n_agree": n_agree, "best_found": round(best_found, 6),
+             "reported": round(reported, 6), "improved": bool(improved),
+             "note": note}, adopt)
+
+
 # ─── 2.8  Objective-sensitivity check ─────────────────────────────────────
 #
 # A converged, readable, goal-matched objective can STILL be structurally
@@ -1632,10 +1710,14 @@ def run_optimization_workflow(
         method = spec["method"]; direction = "maximise" if not spec["minimize"] else "minimise"
         obj_check = _validate_objective_readable(bridge, spec["objective"])
 
-    # ── Step 2.65: OBJECTIVE-MEANINGFULNESS (advisory, non-blocking) ───────
-    # Catch a TRIVIAL/HOLLOW objective (e.g. maximise a product mass flow while
-    # the feed flow is free — optimum just pegs the feed). Never blocks; just
-    # surfaces the risk + an intensive-objective suggestion.
+    # ── Step 2.65: OBJECTIVE-MEANINGFULNESS + hollow-objective REPAIR ───────
+    # Catch a TRIVIAL/HOLLOW objective (e.g. minimise a heater duty while the
+    # feed FLOW is free — the optimum just scales the feed and pegs it to a
+    # bound). When the cause is an extensive objective + a free THROUGHPUT
+    # variable, DETERMINISTICALLY hold throughput fixed (drop those variables)
+    # so the optimiser must find a REAL optimum — provided a genuine decision
+    # variable remains. This turns a hollow run into a meaningful one instead of
+    # only warning about it.
     obj_quality = {"assessed": False}
     try:
         from objective_quality import assess_objective
@@ -1645,6 +1727,33 @@ def run_optimization_workflow(
         if obj_quality.get("severity") == "high":
             _emit("⚠ obj-quality", obj_quality["warning"]
                   + " Suggestion: " + obj_quality["suggestion"])
+
+            # Repair: hold throughput fixed if a real variable would remain.
+            tp = set(obj_quality.get("throughput_vars") or [])
+            if tp:
+                kept = [v for v in spec.get("variables", [])
+                        if f"{v.get('tag','')}.{v.get('property','')}" not in tp]
+                dropped = [v for v in spec.get("variables", [])
+                           if f"{v.get('tag','')}.{v.get('property','')}" in tp]
+                if kept and dropped:
+                    spec["variables"] = kept
+                    held = ", ".join("{}.{}".format(v.get("tag", ""),
+                                                    v.get("property", ""))
+                                     for v in dropped)
+                    kept_names = ", ".join("{}.{}".format(v.get("tag", ""),
+                                                          v.get("property", ""))
+                                           for v in kept)
+                    obj_quality["repaired"] = True
+                    obj_quality["held_fixed"] = held
+                    _emit("🔧 obj-repair",
+                          f"Held throughput fixed ({held}) so the optimum isn't a "
+                          f"trivial feed-scaling. Optimising {kept_names} at fixed "
+                          f"throughput.")
+                else:
+                    obj_quality["repaired"] = False
+                    obj_quality["repair_skipped"] = (
+                        "only throughput variables were chosen — nothing left to "
+                        "optimise at fixed throughput; pick an intensive objective")
         elif obj_quality.get("severity") == "low":
             _emit("ℹ obj-quality", obj_quality["warning"])
     except Exception as _oqexc:
@@ -1995,6 +2104,27 @@ def run_optimization_workflow(
           f"Solver converged in {result.get('n_evaluations', '?')} evaluations "
           f"({result.get('solver_backend', '?')}).")
 
+    # ── Step 3.4: GLOBAL-OPTIMALITY CONFIDENCE ─────────────────────────────
+    # A single local solve gives no evidence the optimum is global. Re-optimise
+    # from a few diverse starts: if they all agree it's strong evidence the
+    # optimum is global; if one finds a better value, adopt it. The complex path
+    # already does global DE/CMA-ES search, so only probe the local path.
+    if not use_complex:
+        try:
+            gc_block, gc_better = _assess_global_confidence(
+                _run_engine, spec, result, spec["minimize"], _emit)
+            if gc_better is not None:
+                result = gc_better
+                _emit("🌐 global-check",
+                      "Adopted a better optimum found from a diverse restart.")
+            result["global_confidence"] = gc_block
+            if gc_block.get("assessed"):
+                _emit("🌐 global-check",
+                      f"Global-optimality confidence: {gc_block.get('confidence')} — "
+                      + gc_block.get("note", ""))
+        except Exception as _gcexc:
+            result["global_confidence"] = {"assessed": False, "error": str(_gcexc)}
+
     # ── Step 3.5: VERIFY the optimum is reproducible ───────────────────────
     # Re-solve at the optimum and re-read the objective from the live flowsheet;
     # the reported `best_objective` must reproduce. Catches a cached/irreprodu-
@@ -2063,6 +2193,13 @@ def run_optimization_workflow(
         oq = (f"\n> ⚠ **Possibly hollow objective:** {obj_quality.get('warning','')}\n"
               f"> _{obj_quality.get('suggestion','')}_\n")
         chat_md = chat_md.replace("\n### 🎯 OBJECTIVE", oq + "\n### 🎯 OBJECTIVE", 1)
+    # Global-optimality confidence banner.
+    _gc = result.get("global_confidence") or {}
+    if _gc.get("assessed"):
+        _icon = {"high": "✅", "medium": "🟡", "low": "⚠"}.get(_gc.get("confidence"), "ℹ")
+        gc_md = (f"\n> {_icon} **Global-optimality confidence: "
+                 f"{str(_gc.get('confidence','')).upper()}** — {_gc.get('note','')}\n")
+        chat_md = chat_md.replace("\n### 🎯 OBJECTIVE", gc_md + "\n### 🎯 OBJECTIVE", 1)
     # ── Learn from this VERIFIED success: persist the (goal → objective →
     #    outcome) case so future similar goals get it as a worked example.
     #    Skip learning from an optimum that FAILED reproduction — we must not

@@ -953,6 +953,24 @@ class DWSIMBridgeV2:
             self._active_alias = None
             self.state = FlowsheetState()
 
+    def reset_to_empty(self) -> Dict[str, Any]:
+        """Purge all flowsheets and return to a clean empty state.
+
+        Used to make benchmark tasks independent: without this, a flowsheet
+        built by one task (its tags, streams, solver state) bleeds into the
+        next, so a later task is measured against the WRONG flowsheet. The
+        agent's own new_flowsheet call then rebuilds the correct one per task.
+        """
+        try:
+            self._purge_stale_flowsheets()           # keep_alias=None → full reset
+            self._building = False
+            self._active_alias = None
+            self.state = FlowsheetState()
+            return {"success": True, "message": "flowsheet reset to empty",
+                    "streams": 0, "unit_ops": 0}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     @property
     def _flowsheet(self):
         if self._active_alias and self._active_alias in self._flowsheets:
@@ -1673,6 +1691,27 @@ class DWSIMBridgeV2:
             direct=("VaporFraction",),
             phase_attrs=("vaporfraction", "VaporFraction"),
             allow_zero=True)
+        if props["vapor_fraction"] is None:
+            # DWSIM does not expose a stream's overall vapor fraction as a direct
+            # attribute or on the Mixture phase — it IS the molar fraction of the
+            # Vapor phase (index 2). Without this, vapor_fraction is silently
+            # absent from results (the flash-separator benchmark could never
+            # verify the phase split). allow_zero so a two-phase stream reports
+            # correctly rather than dropping the key.
+            vf = _read_prop(obj, 2, direct=(),
+                            phase_attrs=("molarfraction", "MolarFraction"),
+                            allow_zero=True)
+            if vf is None:
+                # An all-liquid stream has NO vapor phase, so Phases[2] is
+                # absent and the read above returns None — which looks identical
+                # to a read failure. Derive VF = 1 - (overall-liquid fraction)
+                # instead, so a pure-liquid outlet correctly reports 0.0.
+                lf = _read_prop(obj, 1, direct=(),
+                                phase_attrs=("molarfraction", "MolarFraction"),
+                                allow_zero=True)
+                if lf is not None:
+                    vf = round(1.0 - lf, 8)
+            props["vapor_fraction"] = vf
         props["volumetric_flow_m3_s"] = _read_prop(obj, 0,
             direct=("VolumetricFlow", "volumetricflow"),
             phase_attrs=("volumetric_flow", "volumetricflow", "VolumetricFlow"))

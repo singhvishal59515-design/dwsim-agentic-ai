@@ -357,6 +357,12 @@ async def chat_stream(req: ChatRequest):
                     for evt in agent.chat_stream(req.message): emit(evt)
                 else:
                     answer = agent.chat(req.message)
+                    # The agent has no streaming loop, so replay the tools it
+                    # used this turn as tool_call events. Without this, any SSE
+                    # consumer (notably run_benchmark.py) records 0 tools for
+                    # every run — making tool metrics structurally meaningless.
+                    for _t in (getattr(agent, "_turn_tool_timings", []) or []):
+                        emit({"type":"tool_call","data":_t})
                     emit({"type":"done","data":answer,"session_id":""})
             except Exception as exc:
                 emit({"type":"error","data":str(exc)})
@@ -563,6 +569,29 @@ def fs_delete(req: DeleteObjectRequest):
     try:
         with _bridge_lock:
             return _get_bridge().delete_object(req.tag)
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+@app.post("/flowsheet/new")
+def fs_new():
+    """Purge to a clean empty flowsheet. Used by the benchmark runner to make
+    each task independent (no cross-task flowsheet bleed)."""
+    try:
+        b = _get_bridge()
+        with _bridge_lock:
+            if hasattr(b, "reset_to_empty"):
+                r = b.reset_to_empty()
+            else:
+                r = {"success": False, "error": "bridge has no reset_to_empty"}
+        # Also clear the agent's conversation/state so it doesn't reference the
+        # purged flowsheet.
+        try:
+            a = _get_agent()
+            if hasattr(a, "reset"):
+                a.reset()
+        except Exception:
+            pass
+        return r
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 

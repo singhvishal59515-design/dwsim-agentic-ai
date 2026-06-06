@@ -670,7 +670,8 @@ def run_task(task_id: str, agent: Any) -> Dict[str, Any]:
     try:
         from run_benchmark import _determine_outcome, _evaluate_criterion
         evaluate_criterion = _evaluate_criterion
-        outcome = _determine_outcome(task, chat_result, stream_results)
+        # _determine_outcome now returns (outcome, detail, stats) — unpack it.
+        outcome = _determine_outcome(task, chat_result, stream_results)[0]
     except Exception:
         pass
 
@@ -678,7 +679,9 @@ def run_task(task_id: str, agent: Any) -> Dict[str, Any]:
     for c in task.success_criteria:
         met = False
         if evaluate_criterion is not None:
-            try: met = bool(evaluate_criterion(c, stream_results))
+            # _evaluate_criterion now returns (met, reason); bool() of a non-empty
+            # tuple is ALWAYS True, so unpack the boolean explicitly.
+            try: met = bool(evaluate_criterion(c, stream_results)[0])
             except Exception: met = False
         actual = _criterion_actual(c, stream_results)
         checks.append({

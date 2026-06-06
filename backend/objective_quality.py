@@ -85,8 +85,9 @@ def assess_objective(objective: Dict[str, Any],
     obj_extensive = _is_extensive(obj_prop)
     obj_intensive = _is_intensive(obj_prop)
 
-    ext_vars = [f"{v.get('tag','')}.{v.get('property','')}"
-                for v in (variables or []) if _is_extensive(v.get("property", ""))]
+    ext_var_specs = [v for v in (variables or [])
+                     if _is_extensive(v.get("property", ""))]
+    ext_vars = [f"{v.get('tag','')}.{v.get('property','')}" for v in ext_var_specs]
 
     # ── Flag 1: objective IS one of the decision variables ──────────────────
     for v in (variables or []):
@@ -120,6 +121,11 @@ def assess_objective(objective: Dict[str, Any],
                 f"unit feed/energy)."),
         })
         out["flags"].append("extensive_objective_with_throughput_variable")
+        # The throughput variables that make this objective hollow. The
+        # orchestrator can hold these fixed so the optimiser finds a real optimum
+        # instead of trivially scaling the feed.
+        out["throughput_vars"] = ext_vars
+        out["throughput_var_specs"] = ext_var_specs
         return out
 
     # ── Flag 3 (soft): extensive objective, no intensive signal ─────────────
