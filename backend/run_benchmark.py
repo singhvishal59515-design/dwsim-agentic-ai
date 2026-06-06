@@ -399,6 +399,19 @@ def _determine_outcome(
 # Main runner
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _skip_record(task: BenchmarkTask, run_number: int, reason: str) -> dict:
+    """A task that cannot be measured (missing/mismatched fixture). Counted
+    separately from SUCCESS/FAILURE so it never distorts the agent pass-rate."""
+    return {
+        "task_id": task.task_id, "category": task.category,
+        "complexity": task.complexity, "run": run_number,
+        "outcome": "SKIPPED", "elapsed_s": 0.0, "n_tools": 0,
+        "tools_used": "", "error": "", "quant_met": 0, "quant_tot": 0,
+        "qual_met": 0, "qual_tot": 0, "detail": reason,
+        "answer_words": 0, "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
 def run_task(task: BenchmarkTask, run_number: int, verbose: bool = True) -> dict:
     """Run one benchmark task and return a result record."""
     if verbose:
@@ -412,6 +425,45 @@ def run_task(task: BenchmarkTask, run_number: int, verbose: bool = True) -> dict
     _reset_chat()
     if verbose and not fs_reset:
         print("    (warning: /flowsheet/new did not confirm reset)")
+
+    # Fixture preload: analysis/modification tasks phrased as "the loaded
+    # flowsheet" have nothing to analyse once tasks are isolated. Load the
+    # declared fixture. If the fixture is MISSING (load fails) or MISMATCHED
+    # (loads, but the task's required named streams aren't in it), the task is
+    # unmeasurable through no fault of the agent — mark it SKIPPED and exclude
+    # it from the pass-rate, rather than scoring the agent against missing data.
+    setup = getattr(task, "setup_load", "") or ""
+    requires = getattr(task, "requires_fixture", False)
+    if requires and not setup:
+        # Needs a pre-existing flowsheet but no fixture is wired — unmeasurable.
+        reason = ("requires a pre-loaded flowsheet fixture not present in repo "
+                  "(references 'the loaded flowsheet' / fixture-specific streams)")
+        if verbose:
+            print(f"    ⊘ SKIPPED — {reason}")
+        return _skip_record(task, run_number, reason)
+    if setup:
+        lr = _post("/flowsheet/load", {"path": setup})
+        skip_reason = None
+        if not lr.get("success"):
+            skip_reason = f"fixture '{setup}' could not be loaded ({lr.get('error')})"
+        else:
+            # Named streams the task's quantitative criteria require (excluding
+            # the 'any'/'response' sentinels).
+            need = {c.stream_tag for c in task.success_criteria
+                    if c.stream_tag not in ("any", "response")}
+            if need:
+                sr = _get_stream_results()
+                have = set((sr.get("stream_results") or sr.get("streams") or {}).keys())
+                missing = need - have
+                if missing:
+                    skip_reason = (f"fixture '{setup}' lacks required stream(s): "
+                                   f"{','.join(sorted(missing))} (have: "
+                                   f"{','.join(sorted(have)) or 'none'})")
+        if skip_reason:
+            if verbose:
+                print(f"    ⊘ SKIPPED — {skip_reason}")
+            return _skip_record(task, run_number, skip_reason)
+
     time.sleep(1.0)        # small pause to let server settle
 
     chat_result          = _run_chat(task.prompt)
@@ -441,7 +493,7 @@ def run_task(task: BenchmarkTask, run_number: int, verbose: bool = True) -> dict
     }
 
     status_symbol = {"SUCCESS": "✓", "PARTIAL": "~", "FAILURE_LOUD": "✗",
-                     "FAILURE_SILENT": "⚠"}.get(outcome, "?")
+                     "FAILURE_SILENT": "⚠", "SKIPPED": "⊘"}.get(outcome, "?")
     if verbose:
         print(f"    {status_symbol} {outcome} | {chat_result['elapsed_s']:.1f}s | {n_tools} tools")
 
@@ -485,12 +537,16 @@ def run_all(
                 writer.writerow(record)
 
     # ── Summary ───────────────────────────────────────────────────────────────
+    # SKIPPED tasks (missing/mismatched fixtures) are excluded from the pass-rate
+    # denominator — they measure the test data, not the agent.
+    n_skipped = outcome_counts.get("SKIPPED", 0)
+    scored    = [r for r in all_records if r["outcome"] != "SKIPPED"]
     n_success = outcome_counts.get("SUCCESS", 0) + outcome_counts.get("PARTIAL", 0)
-    n_total   = len(all_records)
+    n_total   = len(scored)
     rate      = n_success / n_total * 100 if n_total else 0.0
 
-    avg_time  = sum(r["elapsed_s"] for r in all_records) / n_total if n_total else 0.0
-    avg_tools = sum(r["n_tools"]   for r in all_records) / n_total if n_total else 0.0
+    avg_time  = sum(r["elapsed_s"] for r in scored) / n_total if n_total else 0.0
+    avg_tools = sum(r["n_tools"]   for r in scored) / n_total if n_total else 0.0
 
     # DWSIM-verified physics pass-rate: fraction of QUANTITATIVE criteria met,
     # checked against live simulation results. This is the defensible headline
@@ -504,7 +560,9 @@ def run_all(
         "timestamp":      ts,
         "n_tasks":        len(tasks),
         "n_runs":         runs,
-        "n_total_runs":   n_total,
+        "n_total_runs":   len(all_records),
+        "n_scored":       n_total,
+        "n_skipped":      n_skipped,
         "outcome_counts": outcome_counts,
         "success_rate_pct": round(rate, 2),
         "quant_criteria_pass_pct": round(q_met / q_tot * 100, 2) if q_tot else None,
@@ -520,10 +578,11 @@ def run_all(
         json.dump(summary, f, indent=2)
 
     print("\n" + "=" * 60)
-    print(f"  Tasks:        {len(tasks)} × {runs} runs = {n_total} total")
+    print(f"  Tasks:        {len(tasks)} × {runs} runs = {len(all_records)} total"
+          + (f"  ({n_skipped} skipped — fixture missing)" if n_skipped else ""))
     print(f"  Success rate: {rate:.1f}%  "
           f"({outcome_counts.get('SUCCESS',0)} SUCCESS + "
-          f"{outcome_counts.get('PARTIAL',0)} PARTIAL / {n_total})")
+          f"{outcome_counts.get('PARTIAL',0)} PARTIAL / {n_total} scored)")
     if q_tot:
         print(f"  Physics pass: {q_met}/{q_tot} quantitative criteria "
               f"({q_met/q_tot*100:.1f}%) — DWSIM-verified")

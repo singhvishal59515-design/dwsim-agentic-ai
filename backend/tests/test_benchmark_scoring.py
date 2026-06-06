@@ -157,3 +157,30 @@ def test_outcome_timeout_is_loud_with_reason():
     assert outcome == "FAILURE_LOUD"
     assert "timed out" in detail
     assert st["quant_tot"] == 0  # never got to evaluate criteria
+
+
+# ── fixture-dependent task handling (SKIPPED, not failed) ─────────────────────
+
+def test_fixture_dependent_tasks_are_flagged():
+    """The 13 tasks referencing a loaded flowsheet must be marked
+    requires_fixture so a missing fixture never depresses the pass-rate."""
+    import benchmark_tasks as bt
+    flagged = {t.task_id for t in bt.BENCHMARK_TASKS
+               if getattr(t, "requires_fixture", False)}
+    # All of C3, C4, C5, plus the loaded-distillation and the pre-existing
+    # convergence-repair tasks.
+    for tid in ("C3-T01", "C3-T02", "C4-T01", "C5-T03", "C6-T03", "C8-T01"):
+        assert tid in flagged, tid
+    # Self-contained creation tasks must NOT be flagged.
+    for tid in ("C1-T01", "C2-T01", "C6-T01", "C7-T01", "C8-T04"):
+        assert tid not in flagged, tid
+
+
+def test_skip_record_shape():
+    task = _task([SC("Product", "temperature_C", "~=", 80.0)])
+    task.task_id = "C9-T99"
+    rec = rb._skip_record(task, 1, "fixture missing")
+    assert rec["outcome"] == "SKIPPED"
+    assert rec["detail"] == "fixture missing"
+    # Skipped rows carry zero criteria so they cannot move the criteria totals.
+    assert rec["quant_tot"] == 0 and rec["qual_tot"] == 0

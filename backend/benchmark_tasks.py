@@ -57,6 +57,15 @@ class BenchmarkTask:
     expected_tools:    List[str] = field(default_factory=list)
     human_time_min:    float = 0.0   # expert baseline (minutes)
     notes:             str = ""
+    # Flowsheet fixture to load BEFORE the prompt runs (after the per-task
+    # reset). Needed for analysis tasks phrased as "the loaded flowsheet" —
+    # without a fixture they have nothing to analyse once tasks are isolated.
+    setup_load:        str = ""
+    # True if the task can only be measured against a pre-existing flowsheet
+    # (it references "the loaded flowsheet" or fixture-specific stream names).
+    # Such a task is SKIPPED (not failed) when no matching fixture is available,
+    # so a missing test fixture never depresses the agent's measured pass-rate.
+    requires_fixture:  bool = False
 
 # ── Category taxonomy ─────────────────────────────────────────────────────────
 CATEGORIES = [
@@ -537,6 +546,23 @@ BENCHMARK_TASKS: List[BenchmarkTask] = [
         human_time_min=45.0,
     ),
 ]
+
+# Tasks that can only be measured against a pre-existing flowsheet fixture (they
+# reference "the loaded flowsheet" or fixture-specific stream names such as
+# MethanolIn / WaterOut). The matching methanol-water heat-exchanger and
+# distillation fixtures are NOT in the repo, so these are SKIPPED — not failed —
+# until such fixtures (and a setup_load pointing at them) are added. Marking them
+# here keeps the measured pass-rate honest (agent capability, not missing data).
+_FIXTURE_DEPENDENT = {
+    "C3-T01", "C3-T02", "C3-T03",         # analysis of a loaded flowsheet
+    "C4-T01", "C4-T02", "C4-T03",         # modify a loaded methanol-water HX
+    "C5-T01", "C5-T02", "C5-T03",         # parametric study of a loaded HX
+    "C6-T03",                              # analyse a loaded distillation column
+    "C8-T01", "C8-T02", "C8-T03",         # repair a pre-existing non-converged sim
+}
+for _t in BENCHMARK_TASKS:
+    if _t.task_id in _FIXTURE_DEPENDENT:
+        _t.requires_fixture = True
 
 # ── Panel API: list / run / results ───────────────────────────────────────────
 # These back the Eval-tab "Benchmark Suite" UI. `run_task` executes one task
