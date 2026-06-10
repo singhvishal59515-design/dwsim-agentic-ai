@@ -2437,7 +2437,9 @@ def eval_benchmark_run_all(req: dict):
     Poll the returned task_id; the final result has results[] + summary{}."""
     try:
         from task_queue import get_queue
-        from benchmark_tasks import run_task, summarize_results, BENCHMARK_TASKS
+        from benchmark_tasks import (run_task, summarize_results, BENCHMARK_TASKS,
+                                     _bridge_mode, persist_results)
+        from datetime import datetime, timezone
         ids = req.get("task_ids") or [t.task_id for t in BENCHMARK_TASKS]
 
         def _worker(report):
@@ -2447,8 +2449,14 @@ def eval_benchmark_run_all(req: dict):
                 try: report(f"task {i}/{len(ids)}", tid)
                 except Exception: pass
                 results.append(run_task(tid, agent))
-            return {"success": True, "results": results,
-                    "summary": summarize_results(results)}
+            out = {"success": True, "mode": _bridge_mode(agent),
+                   "ran_at": datetime.now(timezone.utc).isoformat(),
+                   "results": results, "summary": summarize_results(results)}
+            # Persist so eval_summary.py / the thesis artifacts pick up the
+            # measured pass-rate (and its live/mock mode) without a re-run.
+            try: out["persisted_to"] = persist_results(out)
+            except Exception: pass
+            return out
 
         task_id = get_queue().submit_streaming("benchmark_run_all", _worker)
         return {"success": True, "task_id": task_id, "poll_url": f"/tasks/{task_id}",

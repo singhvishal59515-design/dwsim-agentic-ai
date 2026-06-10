@@ -24,8 +24,13 @@ This task set was fixed BEFORE any experiments were run.
 """
 
 from __future__ import annotations
+import json
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 @dataclass
 class SuccessCriterion:
@@ -780,16 +785,109 @@ def summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def run_all(agent: Any, task_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+def _bridge_mode(agent: Any) -> str:
+    """Honestly classify the run as 'live' (real DWSIMBridgeV2) or 'mock'.
+
+    A thesis number is only meaningful if the reader knows whether it came from
+    the real DWSIM engine or a stub. We classify conservatively: anything that
+    isn't an actual DWSIMBridgeV2 instance counts as 'mock'."""
+    bridge = getattr(agent, "bridge", None)
+    if bridge is None:
+        return "mock"
+    cls = type(bridge).__name__
+    if "mock" in cls.lower() or "fake" in cls.lower() or getattr(bridge, "mock", False):
+        return "mock"
+    try:
+        from dwsim_bridge_v2 import DWSIMBridgeV2
+        if isinstance(bridge, DWSIMBridgeV2):
+            return "live"
+    except Exception:
+        pass
+    return "mock"
+
+
+def render_results_table(results: List[Dict[str, Any]]) -> str:
+    """Render per-task benchmark results as a GitHub-flavoured Markdown table —
+    the thesis-ready artifact. One row per task plus a totals line."""
+    rows = [
+        "| Task | Category | Cx | Outcome | Pass | Tools | Time (s) | Speedup | Notes |",
+        "|---|---|:--:|---|:--:|:--:|--:|--:|---|",
+    ]
+    for r in results:
+        speed = r.get("speedup_vs_human")
+        rows.append(
+            f"| {r.get('benchmark_id','?')} "
+            f"| {r.get('category','?')} "
+            f"| {r.get('complexity','?')} "
+            f"| {r.get('outcome','?')} "
+            f"| {'✅' if r.get('passed') else '❌'} "
+            f"| {r.get('tool_calls',0)} "
+            f"| {r.get('duration_s','?')} "
+            f"| {(str(speed)+'×') if speed else '—'} "
+            f"| {(r.get('notes') or '')[:60].replace(chr(10),' ')} |"
+        )
+    s = summarize_results(results)
+    rows.append(
+        f"| **TOTAL** | | | | **{s['passed']}/{s['total']} "
+        f"({s['pass_rate']}%)** | | | "
+        f"{('mean '+str(s['mean_speedup_vs_human'])+'×') if s.get('mean_speedup_vs_human') else ''} | |"
+    )
+    return "\n".join(rows)
+
+
+def persist_results(report: Dict[str, Any]) -> str:
+    """Persist a run_all report so it survives the process and is picked up by
+    eval_summary.py / the /eval/benchmark/results endpoint. Writes a standalone
+    benchmark_results.json AND merges the per-task results into
+    eval_log.json["benchmark_results"]. Returns the json path. Never raises."""
+    out_path = os.path.join(_HERE, "benchmark_results.json")
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, default=str)
+    except Exception:
+        pass
+    # Merge into eval_log.json so existing readers see a populated pass-rate.
+    try:
+        ev_path = os.path.join(_HERE, "eval_log.json")
+        evlog = {}
+        if os.path.exists(ev_path):
+            with open(ev_path, encoding="utf-8") as f:
+                evlog = json.load(f)
+        if not isinstance(evlog, dict):
+            evlog = {}
+        evlog["benchmark_results"] = report.get("results", [])
+        evlog["benchmark_summary"] = report.get("summary", {})
+        with open(ev_path, "w", encoding="utf-8") as f:
+            json.dump(evlog, f, indent=2, default=str)
+    except Exception:
+        pass
+    return out_path
+
+
+def run_all(agent: Any, task_ids: Optional[List[str]] = None,
+            persist: bool = False) -> Dict[str, Any]:
     """Run the whole benchmark suite (or a subset) in-process against `agent`
     and return per-task results + an aggregate report. SLOW: each task invokes
     the agent + DWSIM (30-90 s). Intended as a deliberate, one-call batch to
     MEASURE capability — the honest answer to "what is the live pass-rate?".
+
+    `mode` ('live'|'mock') is recorded so the report is never mistaken for a
+    real-engine result when it isn't. Set persist=True to write the report to
+    disk (benchmark_results.json + eval_log.json) for the thesis artifact.
     """
     ids = task_ids or [t.task_id for t in BENCHMARK_TASKS]
+    mode = _bridge_mode(agent)
     results = [run_task(tid, agent) for tid in ids]
-    return {"success": True, "results": results,
-            "summary": summarize_results(results)}
+    report = {
+        "success":   True,
+        "mode":      mode,
+        "ran_at":    datetime.now(timezone.utc).isoformat(),
+        "results":   results,
+        "summary":   summarize_results(results),
+    }
+    if persist:
+        report["persisted_to"] = persist_results(report)
+    return report
 
 
 # ── Summary statistics ────────────────────────────────────────────────────────

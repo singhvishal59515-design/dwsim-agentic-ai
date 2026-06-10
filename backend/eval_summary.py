@@ -84,7 +84,15 @@ def summarize() -> str:
                  if isinstance(r.get("h2_yield_mol_pct"), (int, float))]
 
     # ── Formal benchmark suite ───────────────────────────────────────────────
-    bench_results = evlog.get("benchmark_results", []) if isinstance(evlog, dict) else []
+    # Prefer the standalone report (carries the live/mock mode); fall back to
+    # whatever is merged into eval_log.json.
+    bench_report = _load_json("benchmark_results.json", {})
+    if isinstance(bench_report, dict) and bench_report.get("results"):
+        bench_results = bench_report["results"]
+        bench_mode    = bench_report.get("mode", "?")
+    else:
+        bench_results = evlog.get("benchmark_results", []) if isinstance(evlog, dict) else []
+        bench_mode    = "?"
     bench_n = len(bench_results)
 
     # ── Render ───────────────────────────────────────────────────────────────
@@ -139,7 +147,13 @@ def summarize() -> str:
           "against a live DWSIM + LLM key to populate it.")
     else:
         passed = sum(1 for b in bench_results if b.get("passed"))
-        w(f"Pass-rate: **{_pct(passed, bench_n)}** across {bench_n} tasks.")
+        _flag = (" — **mock run, not live-engine evidence**"
+                 if bench_mode == "mock" else "")
+        w(f"Pass-rate: **{_pct(passed, bench_n)}** across {bench_n} tasks "
+          f"(mode: **{bench_mode}**{_flag}).")
+        w()
+        w("Generate/refresh with `python run_benchmark_live.py` against a live "
+          "DWSIM + LLM key.")
     w()
     w("## 4. Component-level correctness (unit tests)")
     w()
