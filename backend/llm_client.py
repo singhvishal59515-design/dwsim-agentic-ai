@@ -143,6 +143,13 @@ DEFAULT_MODELS: Dict[str, str] = {
 # fast and let the agent loop report a clear error instead of hanging.
 _LLM_REQUEST_TIMEOUT_S = 90.0
 
+# Sentinel a system-prompt builder may insert to mark the boundary between the
+# large STABLE instruction prefix and the per-turn DYNAMIC context (flowsheet
+# state, RAG, memory). Providers with explicit prompt caching (Anthropic) cache
+# everything before it; everyone else just strips it. Keeps the ~8k-token base
+# prompt from being re-billed/re-processed on every iteration of a turn.
+CACHE_BREAKPOINT = "<<<PROMPT_CACHE_BREAKPOINT>>>"
+
 # Groq models with tool-calling support, ordered best→fastest.
 # Decommissioned (do NOT add back):
 #   llama-3.1-70b-versatile, llama-3.3-70b-specdec, mixtral-8x7b-32768
@@ -434,8 +441,14 @@ class LLMClient:
             # provider's tool-call format. Convert to the ACTIVE provider's
             # format before dispatch (no-op when already native).
             send_messages = self.normalize_history(messages)
+            # Only Anthropic consumes the cache-breakpoint marker (to split the
+            # cached prefix from dynamic context); strip it for everyone else so
+            # the marker never leaks into a system prompt.
+            sys_arg = system_prompt
+            if sys_arg and self.provider != "anthropic" and CACHE_BREAKPOINT in sys_arg:
+                sys_arg = sys_arg.replace(CACHE_BREAKPOINT, "")
             try:
-                return fn(send_messages, tools, system_prompt)
+                return fn(send_messages, tools, sys_arg)
             except Exception as exc:
                 s = str(exc)
                 is_404 = "404" in s or "NOT_FOUND" in s or "not found" in s.lower()
@@ -898,8 +911,24 @@ class LLMClient:
             "timeout":     _LLM_REQUEST_TIMEOUT_S,
         }
         if system_prompt:
-            kwargs["system"] = system_prompt
+            # Prompt caching: cache the large STABLE instruction prefix so it is
+            # billed/processed once per ~5-min window instead of on every loop
+            # iteration. The builder marks the split with CACHE_BREAKPOINT; the
+            # dynamic suffix (flowsheet state, RAG, memory) stays uncached. Blocks
+            # under the model's min cacheable size are silently not cached — safe.
+            if CACHE_BREAKPOINT in system_prompt:
+                stable, dynamic = system_prompt.split(CACHE_BREAKPOINT, 1)
+                sys_blocks = [{"type": "text", "text": stable,
+                               "cache_control": {"type": "ephemeral"}}]
+                if dynamic.strip():
+                    sys_blocks.append({"type": "text", "text": dynamic})
+                kwargs["system"] = sys_blocks
+            else:
+                kwargs["system"] = system_prompt
         if at:                          # only include tools when non-empty
+            # Cache the tool definitions too (a stable prefix segment): mark the
+            # last tool so the whole block is cached up to that point.
+            at[-1] = {**at[-1], "cache_control": {"type": "ephemeral"}}
             kwargs["tools"] = at
         resp = self._client.messages.create(**kwargs)
         tcs, txts = [], []
@@ -914,6 +943,10 @@ class LLMClient:
             _usage = {
                 "tokens_in":  getattr(resp.usage, "input_tokens",  0) or 0,
                 "tokens_out": getattr(resp.usage, "output_tokens", 0) or 0,
+                # Prompt-cache visibility: how many input tokens were written to
+                # vs read from cache this call (read tokens are ~10% the price).
+                "cache_write": getattr(resp.usage, "cache_creation_input_tokens", 0) or 0,
+                "cache_read":  getattr(resp.usage, "cache_read_input_tokens", 0) or 0,
             }
         return {"content": "".join(txts), "tool_calls": tcs,
                 "stop_reason": resp.stop_reason, "_raw": resp,

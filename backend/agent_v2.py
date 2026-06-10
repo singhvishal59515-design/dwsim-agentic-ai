@@ -20,7 +20,7 @@ import time
 from typing import Any, Callable, Dict, List, Iterator, Optional
 
 from dwsim_bridge_v2 import DWSIMBridgeV2
-from llm_client      import LLMClient
+from llm_client      import LLMClient, CACHE_BREAKPOINT
 from tools_schema_v2 import DWSIM_TOOLS
 
 _log = logging.getLogger("agent_v2")
@@ -1336,7 +1336,13 @@ def _build_system_prompt(bridge: DWSIMBridgeV2,
                          state_delta: Optional[str] = None,
                          user_message: str = "") -> str:
     context = bridge.state.context_summary()
-    prompt  = BASE_SYSTEM_PROMPT.replace("{flowsheet_context}", context)
+    # Insert the cache breakpoint just before the dynamic flowsheet context so
+    # the stable instruction prefix above it can be prompt-cached (Anthropic).
+    # The placeholder sits at the very end of BASE_SYSTEM_PROMPT, so everything
+    # appended below (state delta, RAG, memory) also lands in the dynamic, an
+    # uncached suffix — exactly what we want.
+    prompt  = BASE_SYSTEM_PROMPT.replace(
+        "{flowsheet_context}", CACHE_BREAKPOINT + context)
 
     if state_delta:
         prompt = prompt + "\n\nFLOWSHEET STATE SINCE LAST TURN\n" \
