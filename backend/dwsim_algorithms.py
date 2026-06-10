@@ -220,9 +220,9 @@ def _solve_mathops(
 
     solver = SolverCls()
     try: solver.MaxIterations = int(max_iter)
-    except: pass
+    except Exception: pass
     try: solver.Tolerance = float(tolerance)
-    except: pass
+    except Exception: pass
 
     # Track best-ever value inside the callback so we can return it
     # even if Solve() throws "max iterations reached"

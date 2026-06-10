@@ -115,10 +115,10 @@ def section_unit_tests() -> dict:
             for i, p in enumerate(parts):
                 if p == "passed" and i > 0:
                     try: passed = int(parts[i-1])
-                    except: pass
+                    except (ValueError, IndexError): pass
                 if p == "failed" and i > 0:
                     try: failed = int(parts[i-1])
-                    except: pass
+                    except (ValueError, IndexError): pass
 
     total = passed + failed
     rate  = round(passed / total * 100, 1) if total else 0.0
@@ -498,7 +498,7 @@ def section_ablation_summary() -> dict:
                 line = line.strip()
                 if line:
                     try: entries.append(json.loads(line))
-                    except: pass
+                    except (ValueError, json.JSONDecodeError): pass
 
     if entries:
         # Aggregate by config_id

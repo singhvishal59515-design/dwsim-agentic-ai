@@ -373,6 +373,22 @@ class LLMClient:
 
     # ── public chat ───────────────────────────────────────────────────────────
 
+    def normalize_history(self, messages: List[Dict]) -> List[Dict]:
+        """Return a history guaranteed-compatible with the CURRENT provider.
+
+        Tool-call / tool-result linkage is NOT portable across providers (the
+        ids differ and each SDK rejects foreign shapes), so when the history
+        contains any message that isn't native to the active provider family —
+        i.e. a failover switched providers between turns — the whole history is
+        flattened to neutral alternating plain-text turns that every provider
+        accepts. When nothing is foreign (the overwhelmingly common case) the
+        original list is returned unchanged, so there is zero behaviour change
+        on the steady-state single-provider path."""
+        target = _provider_family(self.provider)
+        if all(_msg_family(m) in (target, None) for m in messages):
+            return messages
+        return _flatten_history_to_text(messages)
+
     def chat(self, messages: List[Dict], tools: List[Dict],
              system_prompt: str = "") -> Dict[str, Any]:
         """
@@ -390,10 +406,36 @@ class LLMClient:
             "anthropic": self._chat_anthropic,
         }
 
-        for attempt in range(1, 5):
+        # Two independent budgets so a transient per-minute rate-limit on one
+        # provider can no longer starve the cross-provider failover:
+        #   * provider_attempt — calls made to the CURRENT provider; resets to 0
+        #     on every model/provider switch. Drives XML-fail detection and the
+        #     per-minute rate-limit retry count.
+        #   * total_calls — global safety cap to guarantee termination even if
+        #     providers keep switching (prevents an infinite fallback ping-pong).
+        provider_attempt = 0
+        total_calls      = 0
+        _MAX_TOTAL_CALLS = 16
+        _last_signature  = None
+
+        while total_calls < _MAX_TOTAL_CALLS:
+            # Reset the per-provider counter whenever the active provider/model
+            # changed since the last iteration (a model or provider switch).
+            _sig = (self.provider, self.model)
+            if _sig != _last_signature:
+                provider_attempt = 0
+                _last_signature  = _sig
+            total_calls      += 1
+            provider_attempt += 1
+            attempt = provider_attempt  # preserve existing per-provider semantics
             fn = _FN[self.provider]
+            # Cross-turn / cross-provider safety: a previous turn (or an earlier
+            # iteration of this loop) may have left `messages` in another
+            # provider's tool-call format. Convert to the ACTIVE provider's
+            # format before dispatch (no-op when already native).
+            send_messages = self.normalize_history(messages)
             try:
-                return fn(messages, tools, system_prompt)
+                return fn(send_messages, tools, system_prompt)
             except Exception as exc:
                 s = str(exc)
                 is_404 = "404" in s or "NOT_FOUND" in s or "not found" in s.lower()
@@ -508,6 +550,11 @@ class LLMClient:
                     continue
                 # All providers exhausted — return None so agent can report gracefully
                 return None
+
+        # Global call budget exhausted (e.g. repeated provider ping-pong) —
+        # give up gracefully so the agent can report instead of hanging.
+        print(f"\n   [LLM] Failover budget exhausted after {total_calls} calls — giving up")
+        return None
 
     # ── history helpers ───────────────────────────────────────────────────────
 
@@ -1121,6 +1168,118 @@ def _parse_groq_tool_use_failed(exc: Exception) -> Optional[Dict]:
 
 def _jstr(obj: Any) -> str:
     return obj if isinstance(obj, str) else json.dumps(obj, default=str)
+
+
+def _provider_family(provider: str) -> str:
+    """Group providers that share an on-the-wire message shape.
+    groq/openai/ollama all speak the OpenAI chat format; anthropic and gemini
+    each have their own. History is only portable WITHIN a family."""
+    if provider in ("groq", "openai", "ollama"):
+        return "openai"
+    if provider == "gemini":
+        return "gemini"
+    return provider  # anthropic (and any future native shape)
+
+
+def _msg_family(m: Dict) -> Optional[str]:
+    """Best-effort classification of which provider family a stored history
+    message belongs to. Returns None for plain `{role, content:str}` messages,
+    which every provider accepts as-is."""
+    role = m.get("role")
+    if "parts" in m or role == "model":
+        return "gemini"
+    if role == "tool" or "tool_calls" in m:
+        return "openai"
+    if isinstance(m.get("content"), list):
+        return "anthropic"
+    return None  # plain-text / system — universal
+
+
+def _msg_to_text(m: Dict) -> str:
+    """Flatten any single history message (any provider shape) into readable
+    plain text, folding tool calls / tool results into bracketed annotations so
+    the conversational context survives a provider switch."""
+    role    = m.get("role")
+    content = m.get("content")
+    chunks: List[str] = []
+
+    # Gemini-style parts
+    if "parts" in m:
+        for p in m.get("parts") or []:
+            if not isinstance(p, dict):
+                chunks.append(str(p)); continue
+            if "text" in p:
+                chunks.append(p["text"])
+            elif "function_call" in p:
+                fc = p["function_call"]
+                chunks.append(f"[called {fc.get('name','')}({_jstr(fc.get('args', {}))})]")
+            elif "function_response" in p:
+                fr = p["function_response"]
+                chunks.append(f"[tool {fr.get('name','')} result: "
+                              f"{_jstr(fr.get('response', {}).get('result', ''))}]")
+        return " ".join(c for c in chunks if c)
+
+    # Anthropic-style content-block list (dicts or SDK objects)
+    if isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict):
+                t = b.get("type")
+                if t == "text" or "text" in b:
+                    chunks.append(b.get("text", ""))
+                elif t == "tool_use":
+                    chunks.append(f"[called {b.get('name','')}({_jstr(b.get('input', {}))})]")
+                elif t == "tool_result":
+                    chunks.append(f"[tool result: {_jstr(b.get('content', ''))}]")
+            else:  # anthropic SDK content block object
+                t = getattr(b, "type", None)
+                if t == "text":
+                    chunks.append(getattr(b, "text", ""))
+                elif t == "tool_use":
+                    chunks.append(f"[called {getattr(b, 'name', '')}("
+                                  f"{_jstr(getattr(b, 'input', {}))})]")
+                elif t == "tool_result":
+                    chunks.append(f"[tool result: {_jstr(getattr(b, 'content', ''))}]")
+        text = " ".join(c for c in chunks if c)
+    else:
+        text = content if isinstance(content, str) else (str(content) if content else "")
+
+    # OpenAI-style tool_calls attached to an assistant message
+    for tc in (m.get("tool_calls") or []):
+        fn   = tc.get("function", {}) if isinstance(tc, dict) else {}
+        text = (text + f"\n[called {fn.get('name','')}({fn.get('arguments','')})]").strip()
+
+    # OpenAI-style tool result message
+    if role == "tool":
+        text = f"[tool {m.get('name', 'tool')} result: {text}]"
+    return text
+
+
+def _flatten_history_to_text(messages: List[Dict]) -> List[Dict]:
+    """Convert a (possibly mixed-provider) history into neutral, strictly
+    alternating user/assistant `{role, content:str}` turns that EVERY provider
+    accepts. Consecutive same-role messages are merged to satisfy Anthropic's
+    alternation requirement; a leading assistant turn is dropped so the
+    transcript always starts with the user."""
+    flat: List[tuple] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue  # system prompt is passed out-of-band, never in history
+        cat  = "assistant" if role in ("assistant", "model") else "user"
+        text = _msg_to_text(m).strip()
+        if text:
+            flat.append((cat, text))
+
+    merged: List[tuple] = []
+    for cat, text in flat:
+        if merged and merged[-1][0] == cat:
+            merged[-1] = (cat, merged[-1][1] + "\n" + text)
+        else:
+            merged.append((cat, text))
+
+    while merged and merged[0][0] == "assistant":
+        merged.pop(0)  # conversation must start with a user turn
+    return [{"role": r, "content": t} for r, t in merged]
 
 
 def _is_quota_error(exc: Exception) -> bool:

@@ -94,7 +94,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from typing import Any as _Any, Dict as _Dict, List as _List, Optional as _Optional
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _BACKEND_DIR)
@@ -192,6 +193,16 @@ async def _lifespan(application: FastAPI):
     global _watcher, _loop
     _loop = asyncio.get_running_loop()
     loop = _loop
+    # Make the IDAES-bundled solvers (ipopt/bonmin/couenne/cbc) discoverable on
+    # PATH so Pyomo finds them globally — the equation-oriented optimiser no
+    # longer relies on a private fallback, and MINLP/global solvers become usable.
+    try:
+        from solver_setup import register_idaes_solvers
+        _sr = register_idaes_solvers()
+        if _sr.get("registered"):
+            print(f"[DWSIM API] Solvers registered: {_sr.get('available')}")
+    except Exception as exc:
+        print(f"[DWSIM API] Solver registration warning: {exc}")
     # Eager init with timeouts so server always starts
     try:
         await asyncio.wait_for(loop.run_in_executor(None, _get_bridge), timeout=8.0)
@@ -223,18 +234,65 @@ async def _lifespan(application: FastAPI):
 
 
 app = FastAPI(title="DWSIM Agentic AI v2", version="2.0.0", lifespan=_lifespan)
+
+# CORS. Default to localhost only (this server drives a live DWSIM instance and
+# spends LLM tokens — it must not be reachable from arbitrary web origins by
+# default). Override with CORS_ORIGINS="https://app.example.com,..." in prod, or
+# CORS_ORIGINS="*" to explicitly opt into open access for trusted networks.
 _cors_origins_env = os.getenv("CORS_ORIGINS", "")
-_cors_origins = (
-    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
-    if _cors_origins_env else ["*"]
-)
+if _cors_origins_env:
+    _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _cors_origins = [
+        "http://localhost:8080", "http://127.0.0.1:8080",
+        "http://localhost:3000", "http://127.0.0.1:3000",
+    ]
+# The CORS spec forbids credentialed requests with a wildcard origin (browsers
+# reject `Access-Control-Allow-Origin: *` together with credentials), so disable
+# credentials whenever origins are wildcarded to keep the header set valid.
+_cors_wildcard = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=not _cors_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Optional bearer-token authentication ────────────────────────────────────
+from fastapi.requests import Request as _FastAPIRequest
+from fastapi.responses import JSONResponse as _JSONResponse
+# Set API_AUTH_TOKEN to require `Authorization: Bearer <token>` on every request
+# (WebSocket clients may instead pass `?token=<token>`). When unset, the server
+# stays open for local development but logs a one-time warning. Health checks,
+# CORS preflight, and the API docs are always exempt so probes/tooling work.
+_API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
+_AUTH_EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico"}
+
+if not _API_AUTH_TOKEN:
+    print("[DWSIM API] WARNING: API_AUTH_TOKEN is not set — the server is "
+          "UNAUTHENTICATED. Set it to require a bearer token on all requests.")
+else:
+    import hmac as _hmac
+
+    @app.middleware("http")
+    async def _auth_middleware(request: _FastAPIRequest, call_next):
+        path = request.url.path
+        if request.method == "OPTIONS" or path in _AUTH_EXEMPT_PATHS:
+            return await call_next(request)
+        token = ""
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+        elif request.query_params.get("token"):
+            token = request.query_params["token"].strip()
+        if not _hmac.compare_digest(token, _API_AUTH_TOKEN):
+            return _JSONResponse(
+                status_code=401,
+                content={"success": False, "error": "Unauthorized",
+                         "error_code": "AUTH_REQUIRED"},
+            )
+        return await call_next(request)
 
 # ── Global structured exception handler ────────────────────────────────────
 # Any uncaught exception from a route now returns a uniform structured
@@ -327,6 +385,65 @@ def diag_providers():
         return diag.probe_llm_providers(timeout_s=3.0)
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+# ── Validated request bodies ────────────────────────────────────────────────
+# These models replace raw `dict` bodies on the structured-input endpoints. Each
+# field is Optional (default None) and `extra="allow"` keeps any unanticipated
+# keys, so the handlers — which still read via `req.get(key, default)` after a
+# `req = req.model_dump(exclude_none=True)` — behave EXACTLY as before. The gain
+# is boundary type-checking (a non-numeric `max_iter`, a non-list `variables`,
+# etc. now return a clean 422 instead of crashing mid-handler) plus OpenAPI docs.
+class _ApiModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+class MultiVarOptRequest(_ApiModel):
+    pass  # spread verbatim into DWSIMOptimizer.multi_optimize(**req)
+
+class BayesianOptRequest(_ApiModel):
+    variables:        _Optional[_List[_Dict[str, _Any]]] = None
+    observe_tag:      _Optional[str]   = None
+    observe_property: _Optional[str]   = None
+    minimize:         _Optional[bool]  = None
+    n_initial:        _Optional[int]   = None
+    max_iter:         _Optional[int]   = None
+    xi:               _Optional[float] = None
+    seed:             _Optional[int]   = None
+    save_plot:        _Optional[str]   = None
+
+class WorkflowRequest(_ApiModel):
+    goal:         _Optional[str]   = None
+    max_iter:     _Optional[int]   = None
+    tolerance:    _Optional[float] = None
+    llm_provider: _Optional[str]   = None
+
+class ComplexOptRequest(_ApiModel):
+    variables:    _Optional[_List[_Dict[str, _Any]]] = None
+    objective:    _Optional[_Dict[str, _Any]] = None
+    minimize:     _Optional[bool]  = None
+    max_iter:     _Optional[int]   = None
+    tolerance:    _Optional[float] = None
+    widen_bounds: _Optional[bool]  = None
+    multi_solver: _Optional[bool]  = None
+    user_goal:    _Optional[str]   = None
+
+class MonteCarloRequest(_ApiModel):
+    vary_params:      _Optional[_List[_Dict[str, _Any]]] = None
+    observe_tag:      _Optional[str] = None
+    observe_property: _Optional[str] = None
+    n_samples:        _Optional[int] = None
+
+class ReflectRequest(_ApiModel):
+    object_name:   _Optional[str] = None
+    property_path: _Optional[str] = None
+    value:         _Optional[_Any] = None
+
+class ExecPythonRequest(_ApiModel):
+    code:      _Optional[str]   = None
+    timeout_s: _Optional[float] = None
+
+class SafetyValidateRequest(_ApiModel):
+    stream_results: _Optional[_Dict[str, _Any]] = None
+
 
 # ── Chat ────────────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
@@ -1240,7 +1357,8 @@ def optimize(req: OptimizeRequest):
     except Exception as exc: return {"success": False, "error": str(exc)}
 
 @app.post("/optimize/multivar")
-def optimize_mv(req: dict):
+def optimize_mv(req: MultiVarOptRequest):
+    req = req.model_dump(exclude_none=True)
     try:
         from optimizer import DWSIMOptimizer
         opt = DWSIMOptimizer(_get_bridge())
@@ -1249,7 +1367,7 @@ def optimize_mv(req: dict):
     except Exception as exc: return {"success": False, "error": str(exc)}
 
 @app.post("/optimize/bayesian")
-def optimize_bo(req: dict):
+def optimize_bo(req: BayesianOptRequest):
     """Gaussian-process Bayesian Optimization of a DWSIM simulation.
 
     Request shape:
@@ -1264,6 +1382,7 @@ def optimize_bo(req: dict):
         "seed":      42
       }
     """
+    req = req.model_dump(exclude_none=True)
     try:
         with _bridge_lock:
             b = _get_bridge()
@@ -1288,7 +1407,7 @@ def optimize_bo(req: dict):
 # ── NL-driven end-to-end optimization workflow (poster flow) ────────────────
 
 @app.post("/optimize/workflow")
-def optimize_workflow(req: dict):
+def optimize_workflow(req: WorkflowRequest):
     """Natural-language optimization workflow matching the poster.
 
     Request:
@@ -1301,6 +1420,7 @@ def optimize_workflow(req: dict):
       {success, spec, result, chat_markdown}
     where chat_markdown is the poster-style result ready to render in chat.
     """
+    req = req.model_dump(exclude_none=True)
     try:
         goal = str(req.get("goal", "")).strip()
         if not goal:
@@ -1330,8 +1450,9 @@ def optimize_workflow(req: dict):
 
 
 @app.post("/optimize/workflow/async")
-def optimize_workflow_async(req: dict):
+def optimize_workflow_async(req: WorkflowRequest):
     """Submit the end-to-end NL optimization workflow to the task queue."""
+    req = req.model_dump(exclude_none=True)
     try:
         from task_queue import get_queue
         goal = str(req.get("goal", "")).strip()
@@ -1400,7 +1521,7 @@ def optimize_suggest_variables(max_n: int = 8):
 # ── Robust complex-flowsheet optimization ──────────────────────────────────
 
 @app.post("/optimize/complex")
-def optimize_complex_endpoint(req: dict):
+def optimize_complex_endpoint(req: ComplexOptRequest):
     """Robust optimization for complex flowsheets — adds:
       • Pre-flight validation (vars writeable, objective readable)
       • Multi-solver: DE (global) → Simplex (local refinement)
@@ -1413,6 +1534,7 @@ def optimize_complex_endpoint(req: dict):
       "multi_solver": true/false (default true)
       "user_goal":   "<original NL goal for sanity-check>"
     """
+    req = req.model_dump(exclude_none=True)
     try:
         llm = None
         if req.get("user_goal"):
@@ -1444,9 +1566,10 @@ def optimize_complex_endpoint(req: dict):
 # ── Reflection / escape-hatch endpoints ─────────────────────────────────────
 
 @app.post("/reflect")
-def reflect(req: dict):
+def reflect(req: ReflectRequest):
     """GET or SET any property on any DWSIM object via .NET reflection.
     {object_name, property_path, value (optional for SET)}"""
+    req = req.model_dump(exclude_none=True)
     try:
         with _bridge_lock:
             b = _get_bridge()
@@ -1460,10 +1583,11 @@ def reflect(req: dict):
 
 
 @app.post("/exec_python")
-def exec_python_endpoint(req: dict):
+def exec_python_endpoint(req: ExecPythonRequest):
     """Execute a sandboxed Python snippet against the live DWSIM flowsheet.
     {code: str, timeout_s: float}
     Context: flowsheet, get_obj(name), results{}, math"""
+    req = req.model_dump(exclude_none=True)
     try:
         with _bridge_lock:
             b = _get_bridge()
@@ -1895,7 +2019,8 @@ def optimize_bo_async(req: dict):
                 "error": str(exc)}
 
 @app.post("/monte-carlo")
-def monte_carlo(req: dict):
+def monte_carlo(req: MonteCarloRequest):
+    req = req.model_dump(exclude_none=True)
     try:
         with _bridge_lock:
             b = _get_bridge()
@@ -2249,7 +2374,8 @@ def safety_cat():
     except Exception as exc: return {"catalogue": [], "error": str(exc)}
 
 @app.post("/safety/validate")
-def safety_validate(req: dict):
+def safety_validate(req: SafetyValidateRequest):
+    req = req.model_dump(exclude_none=True)
     try:
         from safety_validator import validate
         return validate(req.get("stream_results", {}))
@@ -2824,6 +2950,18 @@ def reload_env():
 # ── WebSocket for file watcher ──────────────────────────────────────────────
 @app.websocket("/ws/flowsheets")
 async def ws_flowsheets(ws: WebSocket):
+    # The HTTP auth middleware does not see WebSocket scopes, so enforce the
+    # bearer token here (passed as ?token=… or an Authorization header).
+    if _API_AUTH_TOKEN:
+        import hmac as _hmac
+        token = ws.query_params.get("token", "")
+        if not token:
+            _auth = ws.headers.get("authorization", "")
+            if _auth.lower().startswith("bearer "):
+                token = _auth[7:].strip()
+        if not _hmac.compare_digest(token, _API_AUTH_TOKEN):
+            await ws.close(code=1008)  # policy violation
+            return
     await ws.accept()
     with _ws_lock:
         _ws_clients.append(ws)

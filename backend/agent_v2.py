@@ -12,10 +12,12 @@ import logging
 import math as _math
 import os
 import re as _re
+import queue as _queue
 import sys
 import textwrap
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Iterator, Optional
 
 from dwsim_bridge_v2 import DWSIMBridgeV2
 from llm_client      import LLMClient
@@ -3848,6 +3850,69 @@ class DWSIMAgentV2:
         except Exception:
             self._last_state_snapshot = _turn_start_snap
         return final
+
+    def chat_stream(self, user_message: str) -> Iterator[Dict[str, Any]]:
+        """Streaming variant of `chat()` for the `/chat/stream` SSE endpoint.
+
+        Yields event dicts in real time as the turn progresses:
+          * ``{"type":"token","data":str}``     — incremental answer/progress text
+          * ``{"type":"tool_call","data":{...}}`` — emitted as each tool completes
+          * ``{"type":"done","data":str}``      — the full final answer
+          * ``{"type":"error","data":str}``     — if the turn raised
+
+        It reuses the entire `chat()` loop unchanged — it only installs live
+        ``on_token`` / ``on_tool_call`` sinks that push into a thread-safe queue
+        while `chat()` runs on a worker thread, then restores them. The terminal
+        ``done`` event always carries the authoritative full answer, so a client
+        can treat the token stream as a live preview and `done` as final."""
+        q: "_queue.Queue" = _queue.Queue()
+        _DONE = object()
+
+        # Preserve any externally-configured sinks/flags and restore them after.
+        _saved = (self.on_token, self.on_tool_call,
+                  self.stream_output, self.verbose)
+
+        def _emit_token(text: str) -> None:
+            if text:
+                q.put({"type": "token", "data": text})
+
+        def _emit_tool(name: str, arguments: dict, result: dict) -> None:
+            q.put({"type": "tool_call",
+                   "data": {"name": name, "arguments": arguments,
+                            "result": result}})
+
+        self.on_token      = _emit_token
+        self.on_tool_call  = _emit_tool
+        # Final-answer word streaming in chat() is gated on both flags.
+        self.stream_output = True
+        self.verbose       = True
+
+        holder: Dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                holder["answer"] = self.chat(user_message)
+            except Exception as exc:  # surfaced as an error event below
+                holder["error"] = str(exc)
+            finally:
+                q.put(_DONE)
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        try:
+            while True:
+                evt = q.get()
+                if evt is _DONE:
+                    break
+                yield evt
+            if "error" in holder:
+                yield {"type": "error", "data": holder["error"]}
+            else:
+                yield {"type": "done",
+                       "data": holder.get("answer", ""), "session_id": ""}
+        finally:
+            (self.on_token, self.on_tool_call,
+             self.stream_output, self.verbose) = _saved
 
     def _emit_turn_metrics(self, t0: float, iterations: int,
                            final_text: str,
