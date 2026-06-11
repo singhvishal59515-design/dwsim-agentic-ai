@@ -101,6 +101,16 @@ body.light #para-chart-wrap{background:#ffffff}
 .tool-badge-config{background:#713f12;color:#fde68a}
 .cursor{opacity:.5;animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:.5}50%{opacity:1}}
+/* ── Quick-action chips (chat-first shortcuts) ───────────────────────────── */
+#quick-actions{display:flex;align-items:center;gap:6px;overflow-x:auto;padding:8px 16px 0;background:#1e293b;scrollbar-width:thin;scrollbar-color:#334155 transparent}
+#quick-actions::-webkit-scrollbar{height:5px}
+#quick-actions::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+.qa-lbl{flex:0 0 auto;font-size:10.5px;color:#64748b;font-weight:700;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap;margin-right:1px}
+.qa-chip{flex:0 0 auto;background:#0f172a;border:1px solid #334155;border-radius:16px;color:#cbd5e1;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:background .12s ease,border-color .12s ease,color .12s ease}
+.qa-chip:hover{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
+body.light #quick-actions{background:#fff}
+body.light .qa-chip{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
+body.light .qa-chip:hover{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
 #input-area{padding:12px 16px;background:#1e293b;border-top:1px solid #334155;display:flex;gap:8px}
 #msg-input{flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 14px;font-size:14px;outline:none;resize:none;font-family:inherit}
 #msg-input:focus{border-color:#38bdf8}
@@ -808,6 +818,21 @@ body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
         </div>
         </div><!-- /examples-list -->
       </div>
+    </div>
+    <!-- Quick actions: one-click prompts that run common workflows straight
+         through the chat agent, so users don't have to hunt through tabs. -->
+    <div id="quick-actions">
+      <span class="qa-lbl">⚡ Quick</span>
+      <span class="qa-chip" onclick="quickAction('Run the simulation and summarise convergence and the key stream results.')" title="Solve the flowsheet and summarise results">▶ Run</span>
+      <span class="qa-chip" onclick="quickAction('Suggest the best decision variables and objective for this flowsheet, then optimise it and report the optimum.')" title="Set up and run an optimisation">🎯 Optimise</span>
+      <span class="qa-chip" onclick="quickAction('Run a sensitivity analysis of the main objective with respect to the key operating variables and report which matter most.')" title="Sensitivity / parametric study">🌡 Sensitivity</span>
+      <span class="qa-chip" onclick="quickAction('Estimate the CAPEX, OPEX, and NPV for the current flowsheet and summarise the economics.')" title="Economic analysis">💰 Economics</span>
+      <span class="qa-chip" onclick="quickAction('Validate the current streams against safety limits and flag any violations with their SF codes.')" title="Safety / HAZOP check">🛡 Safety</span>
+      <span class="qa-chip" onclick="quickAction('Run a pinch analysis and report the energy targets, the pinch temperature, and heat-recovery opportunities.')" title="Pinch / energy targeting">♨ Pinch</span>
+      <span class="qa-chip" onclick="quickAction('Generate a full PDF simulation report for the current flowsheet.')" title="Generate a PDF report">📄 Report</span>
+      <span class="qa-chip" onclick="quickAction('List the industrial process templates I can build from, with a one-line description of each.')" title="Browse process templates">🏭 Templates</span>
+      <span class="qa-chip" onclick="quickAction('Compare the current simulation results to published literature values for this process.')" title="Compare to literature">📚 Literature</span>
+      <span class="qa-chip" onclick="quickAction('Search the knowledge base for ', false)" title="Search the chemical-engineering knowledge base">📖 Knowledge…</span>
     </div>
     <div id="input-area">
       <textarea id="msg-input" rows="2"
@@ -4198,6 +4223,26 @@ function handleKey(e) {
 function fillExample(btn) {
   document.getElementById('msg-input').value = btn.textContent.trim();
   document.getElementById('msg-input').focus();
+}
+
+// Quick-action chip: route a common workflow through the chat agent. By
+// default it sends immediately (one-click action); pass send=false to just
+// pre-fill the input so the user can finish typing (e.g. a search query).
+function quickAction(prompt, send) {
+  const i = document.getElementById('msg-input');
+  if (!i) return;
+  i.value = prompt;
+  i.focus();
+  if (send === false) {
+    // place the caret at the end so the user can keep typing
+    try { i.setSelectionRange(prompt.length, prompt.length); } catch (e) {}
+    return;
+  }
+  if (typeof loading !== 'undefined' && loading) {
+    _toast && _toast('Agent is busy — finishing the current response first', false);
+    return;
+  }
+  sendMsg();
 }
 
 // Welcome quick-start: drop a ready prompt into the input and focus it.
