@@ -126,15 +126,24 @@ def _read_object_property(bridge, tag: str, property_name: str) -> Optional[floa
 
 def _write_object_property(bridge, tag: str, property_name: str,
                             value: float, unit: str = "") -> bool:
-    """Write a numeric property to a stream or unit-op."""
+    """Write a numeric property to a stream or unit-op.
+
+    Try the unit-op setter FIRST. `set_unit_op_property` is strict — it fails
+    cleanly when the tag/property isn't a writable unit-op property (e.g. a
+    stream's temperature). `set_stream_property`, by contrast, can spuriously
+    report success on a unit-op tag WITHOUT changing the setpoint — which
+    silently froze optimisation of unit-op decision variables (e.g. a heater's
+    outlet temperature): the variable never moved, so the objective never
+    changed. Strict-first makes routing correct for both object types.
+    """
     try:
-        r = bridge.set_stream_property(tag, property_name, float(value), unit)
+        r = bridge.set_unit_op_property(tag, property_name, float(value))
         if isinstance(r, dict) and r.get("success"):
             return True
     except Exception:
         pass
     try:
-        r = bridge.set_unit_op_property(tag, property_name, float(value))
+        r = bridge.set_stream_property(tag, property_name, float(value), unit)
         if isinstance(r, dict) and r.get("success"):
             return True
     except Exception:
@@ -278,9 +287,11 @@ def run_dwsim_native_optimization(
         """Solver callback: write vars, solve, read objective, return signed value."""
         eval_count[0] += 1
         params = {}
+        x_clamped = []
         for i, v in enumerate(variables):
             val = float(x_vec[i])
             val = max(bounds_lo[i], min(bounds_hi[i], val))   # clamp
+            x_clamped.append(val)
             _write_object_property(bridge, v["tag"], v["property"], val,
                                    v.get("unit", ""))
             params[v["tag"] + "." + v["property"]] = val
@@ -343,7 +354,7 @@ def run_dwsim_native_optimization(
         # Track best (in the signed sense)
         if signed < best["f"]:
             best["f"] = signed
-            best["x"] = list(x_vec)
+            best["x"] = x_clamped   # store the CLAMPED point actually evaluated
             best["obj_raw"] = obj_raw
             best["constraint_pen"] = constraint_pen
             best["n_violations"]   = n_constraint_violations
