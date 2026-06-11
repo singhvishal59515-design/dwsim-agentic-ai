@@ -949,7 +949,21 @@ def run_all(agent: Any, task_ids: Optional[List[str]] = None,
     """
     ids = task_ids or [t.task_id for t in BENCHMARK_TASKS]
     mode = _bridge_mode(agent)
-    results = [run_task(tid, agent) for tid in ids]
+    results = []
+    for tid in ids:
+        results.append(run_task(tid, agent))
+        # Persist after EACH task (the merge is per-task, so this is cheap and
+        # idempotent). A task can crash the in-process .NET CLR outright — a
+        # process-terminating exception Python can't catch — so incremental
+        # persistence guarantees the completed tasks' results survive a crash.
+        if persist:
+            try:
+                persist_results({"success": True, "mode": mode,
+                                 "ran_at": datetime.now(timezone.utc).isoformat(),
+                                 "results": results,
+                                 "summary": summarize_results(results)})
+            except Exception:
+                pass
     report = {
         "success":   True,
         "mode":      mode,
