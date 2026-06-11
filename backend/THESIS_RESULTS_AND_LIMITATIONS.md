@@ -38,9 +38,13 @@ optimization in DWSIM. The contribution is threefold:
    (`run_infeasible_path_optimizer`) implementing the central Aspen optimizer
    technique — promoting recycle tear-stream variables to decision variables
    with the loop-closure equations as equality constraints, so the recycle and
-   the objective converge SIMULTANEOUSLY (Biegler), and a **multi-process
-   parallel evaluator** (`parallel_evaluator`) that removes the single-CLR
-   serialization for population/batch methods.
+   the objective converge SIMULTANEOUSLY (Biegler); a **multi-process parallel
+   evaluator** (`parallel_evaluator`) that removes the single-CLR serialization
+   for population/batch methods; and a **Total-Annualized-Cost objective**
+   (`tac_objective`) — size-dependent Turton power-law capital, annualised by
+   the capital-recovery factor, traded against utility OPEX — so the canonical
+   Aspen workflow "minimise the TAC of this unit" is a single optimization
+   target.
 
 ## 2. Component-Level Validation
 
@@ -67,6 +71,11 @@ tests requiring a live engine are skipped automatically.
   recomputed tear stream — pending validation on a live recycle flowsheet.
 - *Parallel evaluator:* parallel batch results identical to serial (order
   preserved); **1.9× with 4 workers** measured on a representative batch.
+- *TAC objective:* the arithmetic (CRF, Turton power-law CAPEX, utility OPEX)
+  matches hand calculation, and the project optimizer driven by a TAC objective
+  finds the **exact cost-optimal equipment size** on a convex CAPEX↕OPEX
+  trade-off (matches a brute-force reference; the optimum is strictly interior —
+  a genuine economic trade-off, not a bound).
 
 This establishes **component correctness** — the agent selects and sequences
 tools as designed, the optimizers converge on analytic objectives, the recycle
