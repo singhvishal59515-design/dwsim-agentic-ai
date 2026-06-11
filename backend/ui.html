@@ -413,8 +413,8 @@ body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
       style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1"
       id="key-btn">🔑</button>
     <!-- Results panel toggle (chat-first layout) -->
-    <button id="results-toggle" onclick="toggleResultsPanel()" title="Show/hide the results &amp; tools panel"
-      style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1">📊</button>
+    <button id="results-toggle" onclick="toggleResultsPanel()" title="Show/hide the results &amp; tools panel (tables, diagrams, optimisers)"
+      style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;line-height:1.4">📊 Results</button>
     <!-- Theme toggle -->
     <button id="theme-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
       style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1">🌙</button>
@@ -8084,7 +8084,7 @@ function _cmdPaint() {
 }
 function _cmdActivate(i) {
   const id = _cmdItems[i];
-  if (id) { _toggleCommandPalette(false); showTab(id); }
+  if (id) { _toggleCommandPalette(false); showResultsPanel(); showTab(id); }
 }
 function _cmdKeys(e) {
   if (e.key === 'ArrowDown') { e.preventDefault(); _cmdSel = Math.min(_cmdSel + 1, _cmdItems.length - 1); _cmdPaint(); }
@@ -8112,7 +8112,7 @@ function _cycleTab(dir) {
   const ids = _allTabIds();
   const i = ids.indexOf(currentTab);
   const next = ids[(i + dir + ids.length) % ids.length];
-  if (next) showTab(next);
+  if (next) { showResultsPanel(); showTab(next); }
 }
 
 // ── First-run guided tour ────────────────────────────────────────────────────
