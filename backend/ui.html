@@ -8179,13 +8179,15 @@ window.addEventListener('load', () => {
     const u = localStorage.getItem('dwsim_units');
     if (u && u !== 'si' && ['imperial','cgs'].includes(u)) setUnitSystem(u);
   } catch (e) {}
-  // Restore the last-viewed results tab (default 'streams').
+  // Render the tab navigation on load (the group bar + sub-tabs are built by
+  // showTab), restoring the last-viewed tab if it's still a valid tab id.
+  // This MUST run unconditionally — the nav chrome no longer exists as static
+  // HTML, so without this call the group bar would render empty.
   try {
     const last = localStorage.getItem('dwsim_lastTab');
-    if (last && last !== 'streams' && document.getElementById('tab-' + last)) {
-      showTab(last);
-    }
-  } catch (e) {}
+    const initial = (last && _allTabIds().includes(last)) ? last : 'streams';
+    showTab(initial);
+  } catch (e) { try { showTab('streams'); } catch (_) {} }
   // Poll server + LLM status every 15 seconds
   setInterval(() => {
     if (!loading) refreshLLMStatus().catch(()=>{});
