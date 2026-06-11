@@ -886,23 +886,17 @@ def _unit_op_value_to_si(value: float, unit: str) -> float:
 def _route_set_variable(bridge, tag: str, prop: str,
                         value: float, unit: str = "") -> bool:
     """Write an optimisation/study decision variable to a stream OR unit-op,
-    routing correctly. `set_unit_op_property` is STRICT — it fails cleanly when
-    the tag/property is not a writable unit-op property (e.g. a stream's
-    temperature). `set_stream_property` can spuriously report success on a
-    unit-op tag WITHOUT moving the setpoint, which silently froze unit-op
-    decision variables (heater/reactor/column setpoints) so the objective never
-    changed. Try the strict unit-op setter first, then fall back to the stream
-    setter. Module-level (not a bridge method) so it works on any bridge-like
-    object exposing both setters — including the unit-test mocks."""
+    routing correctly (strict unit-op setter first — it fails cleanly on a
+    stream — then the stream setter, which spuriously "succeeds" on a unit-op
+    tag without moving the setpoint and would otherwise freeze unit-op
+    variables). Thin wrapper over the shared dwsim_native_optimizer
+    ._write_object_property so the routing lives in ONE place: the bridge's
+    optimisers/studies and the native optimiser can never diverge. Lazy import
+    keeps this module free of an import cycle. Module-level (not a method) so it
+    works on any bridge-like object — including the unit-test mocks."""
     try:
-        r = bridge.set_unit_op_property(tag, prop, float(value))
-        if isinstance(r, dict) and r.get("success"):
-            return True
-    except Exception:
-        pass
-    try:
-        r = bridge.set_stream_property(tag, prop, float(value), unit)
-        return bool(isinstance(r, dict) and r.get("success"))
+        from dwsim_native_optimizer import _write_object_property
+        return _write_object_property(bridge, tag, prop, value, unit)
     except Exception:
         return False
 

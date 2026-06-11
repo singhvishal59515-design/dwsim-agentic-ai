@@ -71,3 +71,26 @@ def test_run_all_records_mode_and_persists(tmp_path, monkeypatch):
     evlog = json.loads(ev.read_text(encoding="utf-8"))
     assert len(evlog["benchmark_results"]) == 1
     assert evlog["benchmark_summary"]["total"] == 1
+
+
+def test_merge_results_keeps_latest_per_task():
+    prior = [{"benchmark_id": "A", "passed": True},
+             {"benchmark_id": "B", "passed": False}]
+    fresh = [{"benchmark_id": "B", "passed": True}]   # re-ran only B
+    merged = {r["benchmark_id"]: r for r in bt._merge_results(prior, fresh)}
+    assert set(merged) == {"A", "B"}            # A preserved
+    assert merged["B"]["passed"] is True        # B updated to the fresh result
+
+
+def test_subset_persist_does_not_clobber_full_run(tmp_path, monkeypatch):
+    # A full 3-task run, then a 1-task re-check must NOT discard the other two.
+    monkeypatch.setattr(bt, "_HERE", str(tmp_path))
+    ids = [t.task_id for t in bt.BENCHMARK_TASKS[:3]]
+    bt.run_all(_MockAgent(), task_ids=ids, persist=True)
+    bt.run_all(_MockAgent(), task_ids=[ids[0]], persist=True)   # subset re-run
+
+    bj = json.loads((tmp_path / "benchmark_results.json").read_text(encoding="utf-8"))
+    ev = json.loads((tmp_path / "eval_log.json").read_text(encoding="utf-8"))
+    assert len(bj["results"]) == 3, "subset run clobbered the full-run results"
+    assert len(ev["benchmark_results"]) == 3
+    assert bj["summary"]["total"] == 3

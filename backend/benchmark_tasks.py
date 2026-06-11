@@ -835,33 +835,66 @@ def render_results_table(results: List[Dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
+def _merge_results(prior: List[Dict[str, Any]],
+                   fresh: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Latest-result-per-task merge, keyed by benchmark_id. A subset run updates
+    only the tasks it ran and preserves previously-recorded results for the
+    rest — so a quick single-task re-check never discards a full-suite run."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for r in (prior or []):
+        if isinstance(r, dict) and r.get("benchmark_id"):
+            by_id[r["benchmark_id"]] = r
+    for r in (fresh or []):
+        if isinstance(r, dict) and r.get("benchmark_id"):
+            by_id[r["benchmark_id"]] = r
+    return list(by_id.values())
+
+
 def persist_results(report: Dict[str, Any]) -> str:
     """Persist a run_all report so it survives the process and is picked up by
-    eval_summary.py / the /eval/benchmark/results endpoint. Writes a standalone
-    benchmark_results.json AND merges the per-task results into
-    eval_log.json["benchmark_results"]. Returns the json path. Never raises."""
-    out_path = os.path.join(_HERE, "benchmark_results.json")
+    eval_summary.py / the /eval/benchmark/results endpoint. Merges per-task
+    (latest-result-per-task) into BOTH the standalone benchmark_results.json and
+    eval_log.json["benchmark_results"], so a subset run never overwrites a
+    fuller prior run. Returns the json path. Never raises."""
+    bj_path = os.path.join(_HERE, "benchmark_results.json")
+    ev_path = os.path.join(_HERE, "eval_log.json")
+    fresh = report.get("results", [])
+
+    def _load(path, key=None):
+        try:
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    d = json.load(f)
+                return d if key is None else (d.get(key) if isinstance(d, dict) else None)
+        except Exception:
+            pass
+        return None
+
+    # Standalone report: keep this run's mode/ran_at but carry the merged,
+    # cumulative per-task results + a recomputed summary over the full set.
+    merged = _merge_results(_load(bj_path, "results"), fresh)
+    out = dict(report)
+    out["results"] = merged
+    out["summary"] = summarize_results(merged)
     try:
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, default=str)
+        with open(bj_path, "w", encoding="utf-8") as f:
+            json.dump(out, f, indent=2, default=str)
     except Exception:
         pass
-    # Merge into eval_log.json so existing readers see a populated pass-rate.
+
+    # Merge into eval_log.json so existing readers see the cumulative pass-rate.
     try:
-        ev_path = os.path.join(_HERE, "eval_log.json")
-        evlog = {}
-        if os.path.exists(ev_path):
-            with open(ev_path, encoding="utf-8") as f:
-                evlog = json.load(f)
+        evlog = _load(ev_path) or {}
         if not isinstance(evlog, dict):
             evlog = {}
-        evlog["benchmark_results"] = report.get("results", [])
-        evlog["benchmark_summary"] = report.get("summary", {})
+        ev_merged = _merge_results(evlog.get("benchmark_results"), fresh)
+        evlog["benchmark_results"] = ev_merged
+        evlog["benchmark_summary"] = summarize_results(ev_merged)
         with open(ev_path, "w", encoding="utf-8") as f:
             json.dump(evlog, f, indent=2, default=str)
     except Exception:
         pass
-    return out_path
+    return bj_path
 
 
 def run_all(agent: Any, task_ids: Optional[List[str]] = None,

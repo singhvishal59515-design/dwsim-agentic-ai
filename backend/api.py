@@ -284,7 +284,7 @@ else:
             token = auth[7:].strip()
         elif request.query_params.get("token"):
             token = request.query_params["token"].strip()
-        if not _hmac.compare_digest(token, _API_AUTH_TOKEN):
+        if not _hmac.compare_digest(token.encode("utf-8"), _API_AUTH_TOKEN.encode("utf-8")):
             return _JSONResponse(
                 status_code=401,
                 content={"success": False, "error": "Unauthorized",
@@ -2976,7 +2976,7 @@ async def ws_flowsheets(ws: WebSocket):
             _auth = ws.headers.get("authorization", "")
             if _auth.lower().startswith("bearer "):
                 token = _auth[7:].strip()
-        if not _hmac.compare_digest(token, _API_AUTH_TOKEN):
+        if not _hmac.compare_digest(token.encode("utf-8"), _API_AUTH_TOKEN.encode("utf-8")):
             await ws.close(code=1008)  # policy violation
             return
     await ws.accept()
