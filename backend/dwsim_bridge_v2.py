@@ -883,6 +883,30 @@ def _unit_op_value_to_si(value: float, unit: str) -> float:
     return table.get(u, v)
 
 
+def _route_set_variable(bridge, tag: str, prop: str,
+                        value: float, unit: str = "") -> bool:
+    """Write an optimisation/study decision variable to a stream OR unit-op,
+    routing correctly. `set_unit_op_property` is STRICT — it fails cleanly when
+    the tag/property is not a writable unit-op property (e.g. a stream's
+    temperature). `set_stream_property` can spuriously report success on a
+    unit-op tag WITHOUT moving the setpoint, which silently froze unit-op
+    decision variables (heater/reactor/column setpoints) so the objective never
+    changed. Try the strict unit-op setter first, then fall back to the stream
+    setter. Module-level (not a bridge method) so it works on any bridge-like
+    object exposing both setters — including the unit-test mocks."""
+    try:
+        r = bridge.set_unit_op_property(tag, prop, float(value))
+        if isinstance(r, dict) and r.get("success"):
+            return True
+    except Exception:
+        pass
+    try:
+        r = bridge.set_stream_property(tag, prop, float(value), unit)
+        return bool(isinstance(r, dict) and r.get("success"))
+    except Exception:
+        return False
+
+
 class DWSIMBridgeV2:
 
     def __init__(self, dll_folder: Optional[str] = None):
@@ -3057,11 +3081,8 @@ class DWSIMBridgeV2:
 
         def _set_vars(x_vec):
             for v, xi in zip(variables, x_vec):
-                r = self.set_stream_property(
+                _route_set_variable(self, 
                     v["tag"], v["property"], float(xi), v.get("unit", ""))
-                if not r["success"]:
-                    self.set_unit_op_property(
-                        v["tag"], v["property"], float(xi))
 
         def _get_obs():
             obs_r = self.get_stream_properties(observe_tag)
@@ -3307,11 +3328,8 @@ class DWSIMBridgeV2:
                 if base_path:
                     self.load_flowsheet(base_path, alias=base_alias)
                 for v, xi in zip(variables, x_vec):
-                    r = self.set_stream_property(
+                    _route_set_variable(self, 
                         v["tag"], v["property"], float(xi), v.get("unit", ""))
-                    if not r["success"]:
-                        self.set_unit_op_property(
-                            v["tag"], v["property"], float(xi))
                 if not self.run_simulation().get("success"):
                     return None
                 vals = []
@@ -3336,16 +3354,15 @@ class DWSIMBridgeV2:
                         key = f"{v['tag']}.{v['property']}"
                         if key in first:
                             xi = first[key]
-                            if not self.set_stream_property(
-                                    v["tag"], v["property"], float(xi),
-                                    v.get("unit", ""))["success"]:
-                                self.set_unit_op_property(
-                                    v["tag"], v["property"], float(xi))
+                            _route_set_variable(self, 
+                                v["tag"], v["property"], float(xi),
+                                v.get("unit", ""))
                     self.run_simulation()
                 return out
             except Exception as exc:
-                _log.warning("NSGA-II failed (%s); falling back to weighted-sum.",
-                             exc)
+                import logging as _logging
+                _logging.getLogger("dwsim_bridge").warning(
+                    "NSGA-II failed (%s); falling back to weighted-sum.", exc)
                 # fall through to weighted-sum below
 
         # ── Fallback: weighted-sum scalarization (convex front only) ─────────
@@ -3368,11 +3385,8 @@ class DWSIMBridgeV2:
                 if base_path:
                     self.load_flowsheet(base_path, alias=base_alias)
                 for v, xi in zip(variables, x_vec):
-                    r = self.set_stream_property(
-                        v["tag"], v["property"], float(xi), v.get("unit",""))
-                    if not r["success"]:
-                        self.set_unit_op_property(
-                            v["tag"], v["property"], float(xi))
+                    _route_set_variable(self, 
+                        v["tag"], v["property"], float(xi), v.get("unit", ""))
                 run_r = self.run_simulation()
                 if not run_r.get("success"):
                     return 1e9
@@ -3397,11 +3411,8 @@ class DWSIMBridgeV2:
             if base_path:
                 self.load_flowsheet(base_path, alias=base_alias)
             for v, xi in zip(variables, res.x):
-                r = self.set_stream_property(
-                    v["tag"], v["property"], float(xi), v.get("unit",""))
-                if not r["success"]:
-                    self.set_unit_op_property(
-                        v["tag"], v["property"], float(xi))
+                _route_set_variable(self, 
+                    v["tag"], v["property"], float(xi), v.get("unit", ""))
             self.run_simulation()
 
             obj_vals = {}
@@ -3474,11 +3485,8 @@ class DWSIMBridgeV2:
             if base_path:
                 self.load_flowsheet(base_path, alias=base_alias)
             for v, xi in zip(variables, x_vec):
-                r = self.set_stream_property(
+                _route_set_variable(self, 
                     v["tag"], v["property"], float(xi), v.get("unit", ""))
-                if not r["success"]:
-                    self.set_unit_op_property(
-                        v["tag"], v["property"], float(xi))
             if not self.run_simulation().get("success"):
                 return None
             r = self.get_stream_properties(output_tag)
@@ -3537,11 +3545,8 @@ class DWSIMBridgeV2:
             if base_path:
                 self.load_flowsheet(base_path, alias=base_alias)
             for v, xi in zip(variables, x_vec):
-                r = self.set_stream_property(
+                _route_set_variable(self, 
                     v["tag"], v["property"], float(xi), v.get("unit", ""))
-                if not r["success"]:
-                    self.set_unit_op_property(
-                        v["tag"], v["property"], float(xi))
             if not self.run_simulation().get("success"):
                 return {"objective": None, "constraint_values": []}
             r = self.get_stream_properties(observe_tag)
@@ -3612,18 +3617,11 @@ class DWSIMBridgeV2:
                         self.load_flowsheet(base_path, alias=base_alias)
 
                     # Set variable 1
-                    r1 = self.set_stream_property(
+                    _route_set_variable(self, 
                         vary1_tag, vary1_property, float(v1), vary1_unit)
-                    if not r1["success"]:
-                        self.set_unit_op_property(
-                            vary1_tag, vary1_property, float(v1))
-
                     # Set variable 2
-                    r2 = self.set_stream_property(
+                    _route_set_variable(self, 
                         vary2_tag, vary2_property, float(v2), vary2_unit)
-                    if not r2["success"]:
-                        self.set_unit_op_property(
-                            vary2_tag, vary2_property, float(v2))
 
                     # Solve
                     run_r = self.run_simulation()
@@ -3739,10 +3737,7 @@ class DWSIMBridgeV2:
             if not load_r["success"]:
                 return float("inf")
 
-            set_r = self.set_stream_property(vary_tag, vary_property, x, vary_unit)
-            if not set_r["success"]:
-                set_r = self.set_unit_op_property(vary_tag, vary_property, x)
-            if not set_r["success"]:
+            if not _route_set_variable(self, vary_tag, vary_property, x, vary_unit):
                 return float("inf")
 
             run_r = self.run_simulation()
@@ -3990,12 +3985,8 @@ class DWSIMBridgeV2:
             if not load_r["success"]:
                 return float("inf")
             for xi, var in zip(x, variables):
-                set_r = self.set_stream_property(
-                    var["tag"], var["property"], xi, var.get("unit", ""))
-                if not set_r["success"]:
-                    set_r = self.set_unit_op_property(
-                        var["tag"], var["property"], xi)
-                if not set_r["success"]:
+                if not _route_set_variable(self, 
+                        var["tag"], var["property"], xi, var.get("unit", "")):
                     return float("inf")
             run_r = self.run_simulation()
             if not run_r["success"]:
@@ -4112,10 +4103,7 @@ class DWSIMBridgeV2:
             # Apply variable values
             for vm in var_meta:
                 val = params[vm["name"]]
-                r   = self.set_stream_property(vm["tag"], vm["property"], val, vm["unit"])
-                if not r.get("success"):
-                    # Try unit op property if stream fails
-                    self.set_unit_op_property(vm["tag"], vm["property"], val)
+                _route_set_variable(self, vm["tag"], vm["property"], val, vm["unit"])
 
             # Save and solve
             solve_r = self.save_and_solve()
@@ -4415,10 +4403,7 @@ class DWSIMBridgeV2:
             drawn = {}
             for vp, xi in zip(vary_params, inputs):
                 drawn[f"{vp['tag']}.{vp['property']}"] = round(xi, 6)
-                r = self.set_stream_property(vp["tag"], vp["property"], xi, vp.get("unit", ""))
-                if not r["success"]:
-                    r = self.set_unit_op_property(vp["tag"], vp["property"], xi)
-                if not r["success"]:
+                if not _route_set_variable(self, vp["tag"], vp["property"], xi, vp.get("unit", "")):
                     errors.append(f"Run {i}: set {vp['property']}={xi} failed")
                     ok = False
                     break
@@ -4539,11 +4524,8 @@ class DWSIMBridgeV2:
                 errors.append(f"Reload failed at {vary_property}={v}: {load_r['error']}")
                 continue
 
-            set_r = self.set_stream_property(vary_tag, vary_property, v, vary_unit)
-            if not set_r["success"]:
-                set_r = self.set_unit_op_property(vary_tag, vary_property, v)
-            if not set_r["success"]:
-                errors.append(f"Set failed at {vary_property}={v}: {set_r['error']}")
+            if not _route_set_variable(self, vary_tag, vary_property, v, vary_unit):
+                errors.append(f"Set failed at {vary_property}={v}")
                 continue
 
             run_r = self.run_simulation()
