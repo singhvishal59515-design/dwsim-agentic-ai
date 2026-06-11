@@ -62,6 +62,13 @@ body.light #para-chart-wrap{background:#ffffff}
 #center{flex:1;display:flex;flex-direction:column;overflow:hidden}
 /* Right panel */
 #right{width:390px;flex-shrink:0;background:#1e293b;border-left:1px solid #334155;overflow-y:auto}
+/* Chat-first layout: hide the results panel by default so chat fills the screen.
+   The header 📊 toggle (and auto-reveal on new results) brings it back. On wide
+   screens the revealed panel is a little roomier since chat now leads. */
+body.chat-focus #right{display:none}
+body.chat-focus #center{flex:1 1 auto}
+#results-toggle.on{color:#38bdf8;border-color:#38bdf8 !important}
+@media (min-width:1500px){ body:not(.chat-focus) #right{width:440px} }
 
 /* shared section */
 .sec-title{padding:10px 14px 6px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #334155}
@@ -384,7 +391,7 @@ body.light .recent-when{color:#94a3b8}
 body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
 </style>
 </head>
-<body>
+<body class="chat-focus">
 <div id="busy-overlay"></div>
 <div id="toast-stack" aria-live="polite"></div>
 <div id="header">
@@ -405,6 +412,9 @@ body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
     <button onclick="promptApiKey()" title="Set API key (X-API-Key header)"
       style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1"
       id="key-btn">🔑</button>
+    <!-- Results panel toggle (chat-first layout) -->
+    <button id="results-toggle" onclick="toggleResultsPanel()" title="Show/hide the results &amp; tools panel"
+      style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1">📊</button>
     <!-- Theme toggle -->
     <button id="theme-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
       style="background:transparent;border:1px solid #334155;border-radius:6px;color:#94a3b8;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1">🌙</button>
@@ -765,7 +775,7 @@ body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
           <div class="welcome-steps">
             <span><b>1</b> Load a flowsheet on the left, or create a new one</span>
             <span><b>2</b> Ask a question or set values here in chat</span>
-            <span><b>3</b> Read results &amp; tables in the panel on the right</span>
+            <span><b>3</b> Results appear automatically — toggle the panel anytime with 📊</span>
           </div>
           <div class="welcome-chips">
             <button class="welcome-chip" onclick="quickStart('Create a water heating process from 25°C to 80°C at 1 atm, 1 kg/s, using Steam Tables')">✨ Create a flowsheet</button>
@@ -4115,6 +4125,7 @@ async function sendMsg() {
                 streamResults = d.result.stream_results;
                 renderStreams();
                 showTab('streams');
+                showResultsPanel();   // chat-first: auto-reveal when results arrive
                 if (d.result.streams) {
                   const sc = document.getElementById('stream-count');
                   if (sc) sc.textContent = d.result.streams.length;
@@ -4243,6 +4254,35 @@ function quickAction(prompt, send) {
     return;
   }
   sendMsg();
+}
+
+// ── Chat-first layout: results panel show/hide ─────────────────────────────
+// Default is hidden (chat fills the screen). The panel auto-reveals when new
+// simulation results arrive, and the header 📊 button toggles it manually.
+function _isPanelOpen(){ return !document.body.classList.contains('chat-focus'); }
+function _syncResultsToggle(){
+  const b = document.getElementById('results-toggle');
+  if (b) b.classList.toggle('on', _isPanelOpen());
+}
+function showResultsPanel(){
+  document.body.classList.remove('chat-focus');
+  _syncResultsToggle();
+}
+function hideResultsPanel(){
+  document.body.classList.add('chat-focus');
+  _syncResultsToggle();
+}
+function toggleResultsPanel(){
+  const open = document.body.classList.toggle('chat-focus');  // toggles HIDE
+  // User intent is explicit here — remember it as the default for next load.
+  try { localStorage.setItem('dwsim_panel', open ? 'hidden' : 'shown'); } catch(e){}
+  _syncResultsToggle();
+}
+function applyPanelPref(){
+  let pref = 'hidden';
+  try { pref = localStorage.getItem('dwsim_panel') || 'hidden'; } catch(e){}
+  document.body.classList.toggle('chat-focus', pref !== 'shown');
+  _syncResultsToggle();
 }
 
 // Welcome quick-start: drop a ready prompt into the input and focus it.
@@ -8212,6 +8252,7 @@ function _initUIEnhancements() {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
   _applyTheme(_currentTheme);   // restore saved theme
+  applyPanelPref();             // chat-first: results panel hidden unless saved 'shown'
   _initUIEnhancements();        // command palette, a11y, states, tour
   _updateUndoUI();
   refreshAll().catch(()=>{});
