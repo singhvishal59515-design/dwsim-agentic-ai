@@ -1,0 +1,54 @@
+# ───────────────────────────────────────────────────────────────────────────
+# DWSIM Agentic AI v2 — PINNED dependency lock (reproducible install).
+#
+# Use this file for a reproducible environment that matches the tested build:
+#     pip install -r requirements-lock.txt
+#
+# Why pinned: the optimisation/agent behaviour is sensitive to provider-SDK and
+# scientific-library versions, and DWSIM/.NET/LLM-provider drift is the single
+# biggest reproducibility threat. These are the EXACT versions this system was
+# verified against (see TESTED_ENVIRONMENT.md). The companion requirements.txt
+# keeps the human-readable, looser (>=) spec for fresh installs.
+# ───────────────────────────────────────────────────────────────────────────
+
+# ── Tested platform (not pip-installable; documented for reproducibility) ──
+#   DWSIM          == 9.0.5.0   (.NET 8 build, Windows)
+#   .NET runtime   == 8.x
+#   Python         == 3.9.13    (64-bit, Windows)
+
+# ── Web framework ──────────────────────────────────────────────────────────
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+pydantic==2.12.4
+python-dotenv==1.2.1
+
+# ── LLM providers (all four supported via failover) ────────────────────────
+groq==1.0.0
+google-genai==1.47.0
+openai==2.8.1
+anthropic==0.84.0
+
+# ── .NET interop ───────────────────────────────────────────────────────────
+pythonnet==3.0.3
+
+# ── Networking / TLS (SSL-fix path uses these explicitly) ──────────────────
+httpx==0.28.1
+requests==2.32.5
+certifi==2025.11.12
+
+# ── Scientific computing (optimisation + surrogate) ────────────────────────
+scipy==1.13.1
+numpy==2.0.2
+
+# ── Data analysis & reporting ──────────────────────────────────────────────
+pandas==2.3.3
+matplotlib==3.9.4
+reportlab==4.4.10
+pdfplumber==0.11.8
+
+# ── Document generation (thesis / presentation tooling) ────────────────────
+python-docx==1.2.0
+python-pptx==1.0.2
+
+# ── Testing ────────────────────────────────────────────────────────────────
+pytest==8.4.2

@@ -11,7 +11,7 @@ python main_v2.py --provider groq --api-key gsk_XXX --query "List all streams"
 
 Environment variables
 ─────────────────────
-  GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
+  GROQ_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
   LLM_PROVIDER, DWSIM_DLL_FOLDER
 """
 
@@ -32,7 +32,6 @@ from session         import save_session, load_session, list_sessions
 
 ENV_KEY_MAP = {
     "groq":      "GROQ_API_KEY",
-    "gemini":    "GEMINI_API_KEY",
     "ollama":    "",
     "openai":    "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
@@ -55,12 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
 
             FREE providers:
               groq    Best free.  https://console.groq.com
-              gemini  Google free. https://aistudio.google.com/app/apikey
               ollama  Local/free.  https://ollama.com/download
         """),
     )
     p.add_argument("--provider", "-p",
-        choices=["groq","gemini","ollama","openai","anthropic"],
+        choices=["groq","ollama","openai","anthropic"],
         default=os.getenv("LLM_PROVIDER", "groq"))
     p.add_argument("--api-key",   "-k", default=None)
     p.add_argument("--model",     "-m", default=None)
@@ -89,7 +87,7 @@ def main() -> None:
     if args.list_models:
         print("\nDefault model per provider:")
         for prov, mdl in DEFAULT_MODELS.items():
-            free = "FREE" if prov in ("groq","gemini","ollama") else "paid"
+            free = "FREE" if prov in ("groq","ollama") else "paid"
             print(f"  {prov:<12} {mdl:<38} [{free}]")
         print()
         sys.exit(0)
@@ -112,14 +110,12 @@ def main() -> None:
         print(f"\n[Error] No API key for '{provider}'.")
         if provider == "groq":
             print("  Free key: https://console.groq.com")
-        elif provider == "gemini":
-            print("  Free key: https://aistudio.google.com/app/apikey")
         print(f"  Set env:  set {env_var}=YOUR_KEY")
         print(f"  Or pass:  --api-key YOUR_KEY\n")
         sys.exit(1)
 
     model = args.model or DEFAULT_MODELS.get(provider, "")
-    free_label = " [FREE]" if provider in ("groq","gemini","ollama") else " [paid]"
+    free_label = " [FREE]" if provider in ("groq","ollama") else " [paid]"
     print(f"[Init] Connecting {provider.upper()} / {model}{free_label} …",
           end=" ", flush=True)
     try:

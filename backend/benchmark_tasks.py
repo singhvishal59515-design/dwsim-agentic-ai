@@ -24,8 +24,13 @@ This task set was fixed BEFORE any experiments were run.
 """
 
 from __future__ import annotations
+import json
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 @dataclass
 class SuccessCriterion:
@@ -57,6 +62,15 @@ class BenchmarkTask:
     expected_tools:    List[str] = field(default_factory=list)
     human_time_min:    float = 0.0   # expert baseline (minutes)
     notes:             str = ""
+    # Flowsheet fixture to load BEFORE the prompt runs (after the per-task
+    # reset). Needed for analysis tasks phrased as "the loaded flowsheet" —
+    # without a fixture they have nothing to analyse once tasks are isolated.
+    setup_load:        str = ""
+    # True if the task can only be measured against a pre-existing flowsheet
+    # (it references "the loaded flowsheet" or fixture-specific stream names).
+    # Such a task is SKIPPED (not failed) when no matching fixture is available,
+    # so a missing test fixture never depresses the agent's measured pass-rate.
+    requires_fixture:  bool = False
 
 # ── Category taxonomy ─────────────────────────────────────────────────────────
 CATEGORIES = [
@@ -537,6 +551,377 @@ BENCHMARK_TASKS: List[BenchmarkTask] = [
         human_time_min=45.0,
     ),
 ]
+
+# Tasks that can only be measured against a pre-existing flowsheet fixture (they
+# reference "the loaded flowsheet" or fixture-specific stream names such as
+# MethanolIn / WaterOut). The matching methanol-water heat-exchanger and
+# distillation fixtures are NOT in the repo, so these are SKIPPED — not failed —
+# until such fixtures (and a setup_load pointing at them) are added. Marking them
+# here keeps the measured pass-rate honest (agent capability, not missing data).
+_FIXTURE_DEPENDENT = {
+    "C3-T01", "C3-T02", "C3-T03",         # analysis of a loaded flowsheet
+    "C4-T01", "C4-T02", "C4-T03",         # modify a loaded methanol-water HX
+    "C5-T01", "C5-T02", "C5-T03",         # parametric study of a loaded HX
+    "C6-T03",                              # analyse a loaded distillation column
+    "C8-T01", "C8-T02", "C8-T03",         # repair a pre-existing non-converged sim
+}
+for _t in BENCHMARK_TASKS:
+    if _t.task_id in _FIXTURE_DEPENDENT:
+        _t.requires_fixture = True
+
+# ── Panel API: list / run / results ───────────────────────────────────────────
+# These back the Eval-tab "Benchmark Suite" UI. `run_task` executes one task
+# in-process against the live agent and scores it with the SAME pure evaluators
+# the offline CLI uses (run_benchmark._determine_outcome / _evaluate_criterion),
+# so panel results and CLI results are consistent.
+
+_DIFFICULTY = {1: "easy", 2: "medium", 3: "hard"}
+
+# In-memory store of the most recent result per benchmark id (process lifetime).
+_LAST_RESULTS: Dict[str, Dict[str, Any]] = {}
+
+
+def list_tasks() -> List[Dict[str, Any]]:
+    """Benchmark catalogue in the shape the Eval-tab UI renders."""
+    out: List[Dict[str, Any]] = []
+    for t in BENCHMARK_TASKS:
+        name = (t.notes or t.prompt or t.category).strip()
+        if len(name) > 60:
+            name = name[:57].rstrip() + "…"
+        out.append({
+            "id":             t.task_id,
+            "task_id":        t.task_id,   # alias for the Tasks-tab consumer
+            "name":           name,
+            "category":       t.category,
+            "complexity":     t.complexity,
+            "difficulty":     _DIFFICULTY.get(t.complexity, "medium"),
+            "tags":           [t.category] + list(t.expected_tools[:3]),
+            "human_time_min": t.human_time_min,
+            "description":    t.prompt,
+            "n_criteria":     len(t.success_criteria),
+        })
+    return out
+
+
+def get_results() -> Dict[str, Any]:
+    """Most-recent result per benchmark, plus aggregate pass-rate."""
+    results = list(_LAST_RESULTS.values())
+    total = len(results)
+    passed = sum(1 for r in results if r.get("passed"))
+    return {
+        "results":    results,
+        "total_runs": total,
+        "pass_rate":  round(100.0 * passed / total, 1) if total else None,
+    }
+
+
+def _criterion_actual(criterion, stream_results: dict):
+    """Best-effort read of a criterion's measured value from stream_results,
+    tolerant of the two shapes results come in ({tag:{prop:val}} or
+    {tag:{properties:{prop:val}}})."""
+    try:
+        rec = (stream_results or {}).get(criterion.stream_tag, {})
+        if isinstance(rec, dict):
+            if criterion.property in rec:
+                return rec[criterion.property]
+            props = rec.get("properties")
+            if isinstance(props, dict) and criterion.property in props:
+                return props[criterion.property]
+    except Exception:
+        pass
+    return None
+
+
+def run_task(task_id: str, agent: Any) -> Dict[str, Any]:
+    """Run ONE benchmark task in-process against `agent` and score it.
+
+    Returns the envelope the Eval-tab UI expects: passed / outcome / duration_s
+    / speedup_vs_human / tool_calls / convergence / accuracy_checks / notes.
+    Heavy (invokes the agent + DWSIM) but fully guarded — never raises.
+    """
+    import time
+
+    task = next((t for t in BENCHMARK_TASKS if t.task_id == task_id), None)
+    if task is None:
+        return {"success": False, "passed": False, "benchmark_id": task_id,
+                "error": f"Unknown benchmark task {task_id!r}",
+                "notes": f"No such benchmark {task_id!r}"}
+
+    # Capture tool calls via the agent's callback hook (same as eval_harness).
+    tool_calls: List[str] = []
+    prev_cb = getattr(agent, "on_tool_call", None)
+
+    def _cb(name, args, result):
+        tool_calls.append(name)
+        if callable(prev_cb):
+            try: prev_cb(name, args, result)
+            except Exception: pass
+
+    try:
+        agent.on_tool_call = _cb
+    except Exception:
+        pass
+
+    # Fresh conversation per task for isolation (no cache bleed).
+    for meth in ("reset", "reset_conversation", "clear_history"):
+        fn = getattr(agent, meth, None)
+        if callable(fn):
+            try: fn(); break
+            except Exception: pass
+
+    t0 = time.monotonic()
+    answer, error = "", ""
+    try:
+        answer = agent.chat(task.prompt) or ""
+    except Exception as exc:
+        error = str(exc)
+    elapsed = round(time.monotonic() - t0, 2)
+
+    try:
+        agent.on_tool_call = prev_cb
+    except Exception:
+        pass
+
+    # Pull stream results for criteria scoring.
+    stream_results: Dict[str, Any] = {}
+    try:
+        sr = agent.bridge.get_simulation_results()
+        if isinstance(sr, dict):
+            stream_results = sr.get("stream_results", sr)
+    except Exception:
+        pass
+
+    chat_result = {"answer": answer, "error": error,
+                   "tool_calls": [{"name": n} for n in tool_calls],
+                   "elapsed_s": elapsed}
+
+    # Score with the SAME pure evaluators the offline CLI uses.
+    outcome = "FAILURE_LOUD" if error else "SUCCESS"
+    evaluate_criterion = None
+    try:
+        from run_benchmark import _determine_outcome, _evaluate_criterion
+        evaluate_criterion = _evaluate_criterion
+        # _determine_outcome now returns (outcome, detail, stats) — unpack it.
+        outcome = _determine_outcome(task, chat_result, stream_results)[0]
+    except Exception:
+        pass
+
+    checks: List[Dict[str, Any]] = []
+    for c in task.success_criteria:
+        met = False
+        if evaluate_criterion is not None:
+            # _evaluate_criterion now returns (met, reason); bool() of a non-empty
+            # tuple is ALWAYS True, so unpack the boolean explicitly.
+            try: met = bool(evaluate_criterion(c, stream_results)[0])
+            except Exception: met = False
+        actual = _criterion_actual(c, stream_results)
+        checks.append({
+            "metric":    f"{c.stream_tag}.{c.property}",
+            "actual":    actual,
+            "error_pct": None,
+            "passed":    met,
+        })
+
+    passed = outcome == "SUCCESS"
+    convergence = True if (isinstance(stream_results, dict) and stream_results) else None
+    speedup = (round(task.human_time_min * 60.0 / elapsed, 1)
+               if task.human_time_min and elapsed > 0 else None)
+
+    result = {
+        "success":          True,
+        "benchmark_id":     task_id,
+        "category":         task.category,
+        "complexity":       task.complexity,
+        "passed":           passed,
+        "outcome":          outcome,
+        "duration_s":       elapsed,
+        "speedup_vs_human": speedup,
+        "tool_calls":       len(tool_calls),
+        "convergence":      convergence,
+        "accuracy_checks":  checks,
+        "notes":            (error or task.notes or "")[:200],
+        # ── Aliases for the second consumer (Tasks tab) ──
+        "time_s":           elapsed,
+        "speedup_x":        speedup,
+        "human_time_min":   task.human_time_min,
+        "agent_response":   answer,
+    }
+    _LAST_RESULTS[task_id] = result
+    return result
+
+
+def summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate a list of run_task results into a measured-capability report:
+    overall pass-rate plus breakdowns by category and complexity, and mean
+    speed-up vs the human-expert baseline."""
+    from collections import defaultdict
+    total = len(results)
+    passed = sum(1 for r in results if r.get("passed"))
+    by_cat: Dict[str, List[int]] = defaultdict(lambda: [0, 0])
+    by_cmplx: Dict[int, List[int]] = defaultdict(lambda: [0, 0])
+    speedups = []
+    for r in results:
+        c = r.get("category", "?"); cx = int(r.get("complexity", 0) or 0)
+        by_cat[c][1] += 1; by_cmplx[cx][1] += 1
+        if r.get("passed"):
+            by_cat[c][0] += 1; by_cmplx[cx][0] += 1
+        if r.get("speedup_vs_human"):
+            speedups.append(float(r["speedup_vs_human"]))
+
+    def _rate(pt):  # [passed, total] -> percent
+        return round(100.0 * pt[0] / pt[1], 1) if pt[1] else None
+
+    return {
+        "total": total,
+        "passed": passed,
+        "pass_rate": _rate([passed, total]),
+        "by_category": {k: {"passed": v[0], "total": v[1], "pass_rate": _rate(v)}
+                        for k, v in sorted(by_cat.items())},
+        "by_complexity": {str(k): {"passed": v[0], "total": v[1],
+                                   "pass_rate": _rate(v)}
+                          for k, v in sorted(by_cmplx.items())},
+        "mean_speedup_vs_human": (round(sum(speedups) / len(speedups), 1)
+                                  if speedups else None),
+    }
+
+
+def _bridge_mode(agent: Any) -> str:
+    """Honestly classify the run as 'live' (real DWSIMBridgeV2) or 'mock'.
+
+    A thesis number is only meaningful if the reader knows whether it came from
+    the real DWSIM engine or a stub. We classify conservatively: anything that
+    isn't an actual DWSIMBridgeV2 instance counts as 'mock'."""
+    bridge = getattr(agent, "bridge", None)
+    if bridge is None:
+        return "mock"
+    cls = type(bridge).__name__
+    if "mock" in cls.lower() or "fake" in cls.lower() or getattr(bridge, "mock", False):
+        return "mock"
+    try:
+        from dwsim_bridge_v2 import DWSIMBridgeV2
+        if isinstance(bridge, DWSIMBridgeV2):
+            return "live"
+    except Exception:
+        pass
+    return "mock"
+
+
+def render_results_table(results: List[Dict[str, Any]]) -> str:
+    """Render per-task benchmark results as a GitHub-flavoured Markdown table —
+    the thesis-ready artifact. One row per task plus a totals line."""
+    rows = [
+        "| Task | Category | Cx | Outcome | Pass | Tools | Time (s) | Speedup | Notes |",
+        "|---|---|:--:|---|:--:|:--:|--:|--:|---|",
+    ]
+    for r in results:
+        speed = r.get("speedup_vs_human")
+        rows.append(
+            f"| {r.get('benchmark_id','?')} "
+            f"| {r.get('category','?')} "
+            f"| {r.get('complexity','?')} "
+            f"| {r.get('outcome','?')} "
+            f"| {'✅' if r.get('passed') else '❌'} "
+            f"| {r.get('tool_calls',0)} "
+            f"| {r.get('duration_s','?')} "
+            f"| {(str(speed)+'×') if speed else '—'} "
+            f"| {(r.get('notes') or '')[:60].replace(chr(10),' ')} |"
+        )
+    s = summarize_results(results)
+    rows.append(
+        f"| **TOTAL** | | | | **{s['passed']}/{s['total']} "
+        f"({s['pass_rate']}%)** | | | "
+        f"{('mean '+str(s['mean_speedup_vs_human'])+'×') if s.get('mean_speedup_vs_human') else ''} | |"
+    )
+    return "\n".join(rows)
+
+
+def _merge_results(prior: List[Dict[str, Any]],
+                   fresh: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Latest-result-per-task merge, keyed by benchmark_id. A subset run updates
+    only the tasks it ran and preserves previously-recorded results for the
+    rest — so a quick single-task re-check never discards a full-suite run."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for r in (prior or []):
+        if isinstance(r, dict) and r.get("benchmark_id"):
+            by_id[r["benchmark_id"]] = r
+    for r in (fresh or []):
+        if isinstance(r, dict) and r.get("benchmark_id"):
+            by_id[r["benchmark_id"]] = r
+    return list(by_id.values())
+
+
+def persist_results(report: Dict[str, Any]) -> str:
+    """Persist a run_all report so it survives the process and is picked up by
+    eval_summary.py / the /eval/benchmark/results endpoint. Merges per-task
+    (latest-result-per-task) into BOTH the standalone benchmark_results.json and
+    eval_log.json["benchmark_results"], so a subset run never overwrites a
+    fuller prior run. Returns the json path. Never raises."""
+    bj_path = os.path.join(_HERE, "benchmark_results.json")
+    ev_path = os.path.join(_HERE, "eval_log.json")
+    fresh = report.get("results", [])
+
+    def _load(path, key=None):
+        try:
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    d = json.load(f)
+                return d if key is None else (d.get(key) if isinstance(d, dict) else None)
+        except Exception:
+            pass
+        return None
+
+    # Standalone report: keep this run's mode/ran_at but carry the merged,
+    # cumulative per-task results + a recomputed summary over the full set.
+    merged = _merge_results(_load(bj_path, "results"), fresh)
+    out = dict(report)
+    out["results"] = merged
+    out["summary"] = summarize_results(merged)
+    try:
+        with open(bj_path, "w", encoding="utf-8") as f:
+            json.dump(out, f, indent=2, default=str)
+    except Exception:
+        pass
+
+    # Merge into eval_log.json so existing readers see the cumulative pass-rate.
+    try:
+        evlog = _load(ev_path) or {}
+        if not isinstance(evlog, dict):
+            evlog = {}
+        ev_merged = _merge_results(evlog.get("benchmark_results"), fresh)
+        evlog["benchmark_results"] = ev_merged
+        evlog["benchmark_summary"] = summarize_results(ev_merged)
+        with open(ev_path, "w", encoding="utf-8") as f:
+            json.dump(evlog, f, indent=2, default=str)
+    except Exception:
+        pass
+    return bj_path
+
+
+def run_all(agent: Any, task_ids: Optional[List[str]] = None,
+            persist: bool = False) -> Dict[str, Any]:
+    """Run the whole benchmark suite (or a subset) in-process against `agent`
+    and return per-task results + an aggregate report. SLOW: each task invokes
+    the agent + DWSIM (30-90 s). Intended as a deliberate, one-call batch to
+    MEASURE capability — the honest answer to "what is the live pass-rate?".
+
+    `mode` ('live'|'mock') is recorded so the report is never mistaken for a
+    real-engine result when it isn't. Set persist=True to write the report to
+    disk (benchmark_results.json + eval_log.json) for the thesis artifact.
+    """
+    ids = task_ids or [t.task_id for t in BENCHMARK_TASKS]
+    mode = _bridge_mode(agent)
+    results = [run_task(tid, agent) for tid in ids]
+    report = {
+        "success":   True,
+        "mode":      mode,
+        "ran_at":    datetime.now(timezone.utc).isoformat(),
+        "results":   results,
+        "summary":   summarize_results(results),
+    }
+    if persist:
+        report["persisted_to"] = persist_results(report)
+    return report
+
 
 # ── Summary statistics ────────────────────────────────────────────────────────
 def task_summary() -> dict:

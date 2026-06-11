@@ -303,7 +303,12 @@ class BayesianOptimizer:
     # ── EI maximisation ───────────────────────────────────────────────────────
 
     def _next_x(self, gp: _GP, f_best: float) -> np.ndarray:
-        n_cand = min(self.grid_size ** self.d, 10_000)
+        # Cap candidate set aggressively: the kernel-prediction step builds
+        # an n_cand×n_train distance matrix. n_cand=10000 with 20+ train
+        # points = 200 KB; but the kernel matrix between candidates pairwise
+        # would be 100 M × 8 bytes = 800 MB. Cap at 2000 to keep predict()
+        # under a second per call even at 10+ dimensions.
+        n_cand = min(self.grid_size ** self.d, 2_000)
         X_c    = self._rng.uniform(0, 1, (n_cand, self.d))
         mu, var = gp.predict(X_c)
         acq     = _ei(mu, var, f_best, self.xi)

@@ -34,7 +34,7 @@ load_dotenv(override=True)
 # This prevents fallback loops on providers with expired keys
 import os as _os
 _env_vals = dotenv_values()  # parse .env without side effects
-for _k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY"):
+for _k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"):
     _val = _env_vals.get(_k, "")
     if not _val:  # key was commented out or empty in .env
         _os.environ.pop(_k, None)  # remove from environment so fallback skips it
@@ -301,7 +301,7 @@ def run_ablation(
                     llm = LLMClient(
                         provider=provider,
                         api_key=api_key or os.getenv(
-                            {"groq":"GROQ_API_KEY","gemini":"GEMINI_API_KEY",
+                            {"groq":"GROQ_API_KEY",
                              "openai":"OPENAI_API_KEY","anthropic":"ANTHROPIC_API_KEY"
                              }.get(provider, "GROQ_API_KEY"), ""),
                         model=model or DEFAULT_MODELS.get(provider, ""),
