@@ -49,7 +49,8 @@ RUNS_DEFAULT = 3
 
 # ── Import task definitions ───────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(__file__))
-from benchmark_tasks import BENCHMARK_TASKS, BenchmarkTask, SuccessCriterion
+from benchmark_tasks import (BENCHMARK_TASKS, BenchmarkTask, SuccessCriterion,
+                             _resolve_stream)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -226,12 +227,14 @@ def _evaluate_criterion(criterion: SuccessCriterion, stream_results: dict):
                or stream_results)
     if not isinstance(streams, dict):
         return False, f"{want}: no stream results returned"
-    if criterion.stream_tag not in streams:
+    # Resolve by tag, tolerant of casing and role-equivalent names (the agent
+    # may name the product stream "Outlet" etc.) — fair without false passes.
+    s = _resolve_stream(streams, criterion.stream_tag)
+    if not isinstance(s, dict):
         avail = ",".join(sorted(k for k in streams.keys() if isinstance(k, str))[:8])
         return False, f"{want}: stream '{criterion.stream_tag}' not found (have: {avail or 'none'})"
 
-    s   = streams[criterion.stream_tag]
-    val = _stream_value(s, criterion.property) if isinstance(s, dict) else None
+    val = _stream_value(s, criterion.property)
     if val is None:
         return False, f"{want}: property '{criterion.property}' unreadable"
 

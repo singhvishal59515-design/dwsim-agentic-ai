@@ -3505,9 +3505,16 @@ class DWSIMBridgeV2:
         n_samples: int = 0,
         seed: int = 42,
         max_refine: int = 3,
+        method: str = "global",
     ) -> Dict[str, Any]:
         """
         Equation-oriented (EO) optimization — the Aspen-EO analogue.
+
+        method="global"        : global quadratic surrogate + adaptive refinement
+        method="trust_region"  : derivative-free TRUST-REGION surrogate EO —
+                                 local quadratic models with rho-based step
+                                 acceptance and adaptive radius (provably
+                                 convergent; better on nonlinear/coupled units).
 
         Builds a smooth ALGEBRAIC surrogate of the flowsheet from a
         Latin-hypercube DOE, then solves the optimisation + model SIMULTANEOUSLY
@@ -3557,12 +3564,64 @@ class DWSIMBridgeV2:
                     "constraint_values": [float(v) if v is not None else None
                                           for v in cvals]}
 
+        cspecs = [{"operator": c.get("operator", ">="), "value": c.get("value")}
+                  for c in cons]
+        if str(method).lower() in ("trust_region", "trust-region", "tr"):
+            from eo_optimizer import run_eo_trust_region
+            return run_eo_trust_region(
+                _evaluate, variables, constraint_specs=cspecs,
+                minimize=minimize, seed=int(seed))
         return run_eo_optimization(
-            _evaluate, variables,
-            constraint_specs=[{"operator": c.get("operator", ">="),
-                               "value": c.get("value")} for c in cons],
+            _evaluate, variables, constraint_specs=cspecs,
             minimize=minimize, n_samples=int(n_samples), seed=int(seed),
             max_refine=int(max_refine))
+
+    def parallel_evaluate_designs(
+        self,
+        variables: List[Dict],
+        observe_tag: str,
+        observe_property: str,
+        designs: List[List[float]],
+        constraints: Optional[List[Dict]] = None,
+        n_workers: int = 4,
+    ) -> Dict[str, Any]:
+        """Evaluate a BATCH of decision-variable vectors in PARALLEL across
+        `n_workers` private DWSIM engines (separate processes / CLRs), bypassing
+        the single in-process-CLR serialization. The current flowsheet is saved
+        so each worker loads its own copy; every design is set→solved→read
+        independently, then results are returned in input order.
+
+        This is the batch primitive for population optimisers (NSGA-II, CMA-ES),
+        Sobol sampling, and parametric sweeps — pass it a generation/sample set
+        and it solves them concurrently. `designs` is [[x1,x2,…], …] aligned to
+        `variables`. Returns {success, results:[{objective, constraint_values}],
+        n_workers, n_designs}.
+        """
+        if self._flowsheet is None:
+            return {"success": False, "error": "No flowsheet loaded"}
+        path = self._flowsheet_path
+        if not path:
+            sr = self.save_flowsheet()
+            path = sr.get("path") if isinstance(sr, dict) else self._flowsheet_path
+        if not path:
+            return {"success": False,
+                    "error": "flowsheet must be saved to a file for parallel "
+                             "evaluation; save it first."}
+        else:
+            self.save_flowsheet(path)   # ensure workers load the current state
+        try:
+            from parallel_evaluator import parallel_map, make_dwsim_evaluator
+        except Exception as exc:
+            return {"success": False, "error": f"parallel_evaluator unavailable: {exc}"}
+        cons = constraints or []
+        cspecs = [{"tag": c["tag"], "property": c["property"]} for c in cons]
+        results = parallel_map(
+            make_dwsim_evaluator,
+            (path, variables, observe_tag, observe_property, cspecs, self.dll_folder),
+            [list(map(float, d)) for d in designs],
+            n_workers=int(n_workers))
+        return {"success": True, "results": results,
+                "n_workers": int(n_workers), "n_designs": len(designs)}
 
     def parametric_study_2d(
         self,

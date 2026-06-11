@@ -416,6 +416,227 @@ def run_eo_optimization(
     }
 
 
+def _lhs_in_box(count, blo, bhi, seed):
+    """`count` Latin-hypercube points inside the box [blo, bhi]."""
+    import numpy as np
+    d = len(blo)
+    try:
+        from scipy.stats.qmc import LatinHypercube
+        unit = LatinHypercube(d=d, seed=seed).random(count)
+    except Exception:
+        unit = np.random.default_rng(seed).random((count, d))
+    return np.asarray(blo) + unit * (np.asarray(bhi) - np.asarray(blo))
+
+
+def run_eo_trust_region(
+    evaluate: Callable[[List[float]], Dict[str, Any]],
+    variables: List[Dict[str, Any]],
+    constraint_specs: Optional[List[Dict[str, Any]]] = None,
+    minimize: bool = True,
+    seed: int = 42,
+    max_iter: int = 20,
+    init_radius_frac: float = 0.35,
+    eta_accept: float = 0.10,
+    eta_great: float = 0.75,
+    gamma_shrink: float = 0.5,
+    gamma_grow: float = 2.0,
+    radius_tol: float = 1e-3,
+    x0: Optional[List[float]] = None,
+) -> Dict[str, Any]:
+    """Derivative-free TRUST-REGION equation-oriented optimization.
+
+    A rigorous upgrade of the global-refit surrogate EO: instead of fitting one
+    quadratic over the whole box and trusting its global optimum, this builds a
+    LOCAL quadratic model inside a trust region of radius Δ around the current
+    best point, minimises it within that region, then uses the standard
+    trust-region acceptance ratio
+
+        ρ = (actual reduction) / (predicted reduction)
+
+    to decide whether to take the step and whether to grow or shrink Δ:
+      ρ ≥ eta_great → very good model: accept and GROW Δ
+      ρ ≥ eta_accept → adequate: accept, keep Δ
+      ρ < eta_accept → poor model: REJECT and SHRINK Δ
+    Shrinking on rejection guarantees the model eventually becomes accurate
+    enough to make progress — this is the convergence mechanism (trust-region
+    model management; Conn, Scheinberg & Vicente, *Introduction to Derivative-
+    Free Optimization*, SIAM 2009). Each iteration tops the local sample pool up
+    to a well-determined quadratic INSIDE the current region, so the model is
+    always valid where it is trusted — unlike a single global quadratic, which is
+    a poor fit far from the optimum on nonlinear flowsheets.
+
+    Signature matches run_eo_optimization's `evaluate` (one DWSIM solve →
+    {"objective", "constraint_values"}). Constraints (if any) are imposed on the
+    surrogate within the region. Returns the optimum plus the full Δ/ρ history.
+    """
+    import numpy as np
+
+    n = len(variables)
+    lo = np.array([float(v["lower"]) for v in variables], dtype=float)
+    hi = np.array([float(v["upper"]) for v in variables], dtype=float)
+    span = hi - lo
+    cspecs = constraint_specs or []
+    sign = 1.0 if minimize else -1.0
+    n_quad = 1 + n + len(_quad_terms(n))
+
+    # Cache true evaluations by rounded point so the center is never re-solved.
+    _cache: Dict[tuple, Dict[str, Any]] = {}
+    def _ev(x):
+        key = tuple(round(float(v), 9) for v in x)
+        if key not in _cache:
+            _cache[key] = evaluate([float(v) for v in x]) or {}
+        return _cache[key]
+
+    def _obj_signed(x):
+        o = _ev(x).get("objective")
+        return (sign * float(o)) if (o is not None and np.isfinite(o)) else None
+
+    def _feasible(x):
+        cv = _ev(x).get("constraint_values") or []
+        for i, spec in enumerate(cspecs):
+            if i >= len(cv) or cv[i] is None:
+                return False
+            v = float(cv[i]); lim = float(spec.get("value", 0.0))
+            op = spec.get("operator", ">="); tol = 1e-3 * (abs(lim) + 1.0)
+            if op == ">=" and v < lim - tol: return False
+            if op == "<=" and v > lim + tol: return False
+            if op == "==" and abs(v - lim) > tol: return False
+        return True
+
+    center = (np.array(x0, dtype=float) if x0 is not None
+              else 0.5 * (lo + hi)).clip(lo, hi)
+    f_center = _obj_signed(center)
+    if f_center is None:
+        return {"success": False, "error": "objective not evaluable at the "
+                "start point; widen bounds or provide a feasible x0."}
+
+    delta = float(init_radius_frac)          # fraction of the box, per dimension
+    pool_X: List[np.ndarray] = [center.copy()]
+    pool_y: List[float] = [f_center]
+    history: List[Dict[str, Any]] = []
+    rng_seed = seed
+
+    def _tr_box(c, d):
+        r = d * span
+        return np.maximum(lo, c - r), np.minimum(hi, c + r)
+
+    converged = False
+    for it in range(max_iter):
+        blo, bhi = _tr_box(center, delta)
+        # Keep only pool points inside the current region, then top up to a
+        # well-determined local quadratic with fresh in-region samples.
+        Xp = np.atleast_2d(pool_X); yp = np.array(pool_y)
+        inside = np.all((Xp >= blo - 1e-12) & (Xp <= bhi + 1e-12), axis=1)
+        Xin, yin = list(Xp[inside]), list(yp[inside])
+        need = max(0, (n_quad + 2) - len(Xin))
+        if need > 0:
+            rng_seed += 1
+            for row in _lhs_in_box(need, blo, bhi, rng_seed):
+                fy = _obj_signed(row)
+                if fy is not None:
+                    Xin.append(np.asarray(row, dtype=float)); yin.append(fy)
+                    pool_X.append(np.asarray(row, dtype=float)); pool_y.append(fy)
+        if len(Xin) < n_quad:
+            delta *= gamma_shrink
+            if delta * float(np.max(span)) < radius_tol:
+                break
+            continue
+
+        Xin_a = np.atleast_2d(Xin)
+        coef, r2 = _fit_quadratic(Xin_a, np.array(yin), n)
+        model = _make_quad_callable(coef, n)
+
+        # Minimise the local model within the trust-region box (+ surrogate
+        # constraints, mapped through their own local quadratics).
+        con_coef = []
+        for i in range(len(cspecs)):
+            cy = [(_ev(x).get("constraint_values") or [None]*len(cspecs))[i] for x in Xin]
+            if any(v is None for v in cy):
+                con_coef = None; break
+            cc, _ = _fit_quadratic(Xin_a, np.array([float(v) for v in cy]), n)
+            con_coef.append(cc)
+        x_cand = _minimize_model_in_box(coef, con_coef, cspecs, blo, bhi, center, n)
+
+        pred = f_center - model(x_cand)          # predicted reduction (signed)
+        f_cand = _obj_signed(x_cand)
+        if f_cand is None:                       # infeasible/failed solve here
+            delta *= gamma_shrink
+            rho = None; accepted = False
+        else:
+            actual = f_center - f_cand
+            rho = actual / pred if abs(pred) > 1e-12 else (1.0 if actual > 0 else -1.0)
+            accepted = rho >= eta_accept and f_cand < f_center
+            pool_X.append(np.asarray(x_cand, dtype=float)); pool_y.append(f_cand)
+            if accepted:
+                center, f_center = np.asarray(x_cand, dtype=float), f_cand
+                if rho >= eta_great:
+                    delta = min(delta * gamma_grow, 1.0)
+            else:
+                delta *= gamma_shrink
+
+        step = float(np.linalg.norm((x_cand - center) / np.where(span > 0, span, 1)))
+        history.append({"iter": it, "radius": round(delta, 6),
+                        "rho": (round(float(rho), 4) if rho is not None else None),
+                        "accepted": bool(accepted), "r2": round(float(r2), 4),
+                        "f_center": round(sign * f_center, 6)})
+
+        if delta * float(np.max(span)) < radius_tol:
+            converged = True
+            break
+
+    feasible = _feasible(center) if cspecs else True
+    o_true = _ev(center).get("objective")
+    return {
+        "success": True,
+        "method": "trust-region surrogate EO (derivative-free)",
+        "x": {f"{v['tag']}.{v['property']}": round(float(center[i]), 6)
+              for i, v in enumerate(variables)},
+        "objective": (round(float(o_true), 6) if o_true is not None else None),
+        "feasible": bool(feasible),
+        "converged": bool(converged),
+        "final_radius": round(float(delta), 6),
+        "n_evaluations": len(_cache),
+        "n_iterations": len(history),
+        "history": history,
+        "minimize": minimize,
+        "note": ("Trust-region surrogate EO: local quadratic models with ρ-based "
+                 "step acceptance and adaptive radius — a provably-convergent "
+                 "model-management scheme, unlike a single global surrogate."),
+    }
+
+
+def _minimize_model_in_box(obj_coef, con_coef, cspecs, blo, bhi, x0, n):
+    """Minimise the quadratic model (+ optional surrogate constraints) inside the
+    trust-region box. IPOPT if available, else SciPy SLSQP — same formulation."""
+    import numpy as np
+    if con_coef is not None and ipopt_available():
+        try:
+            xo, _ = _solve_with_ipopt(obj_coef, con_coef, cspecs,
+                                      np.asarray(blo), np.asarray(bhi),
+                                      np.asarray(x0), n, True)
+            return np.clip(xo, blo, bhi)
+        except Exception:
+            pass
+    from scipy.optimize import minimize as _min
+    cons = []
+    for k, spec in enumerate(cspecs):
+        if con_coef is None:
+            break
+        op = spec.get("operator", ">="); lim = float(spec.get("value", 0.0))
+        g = _make_quad_callable(con_coef[k], n)
+        if op == "<=":
+            cons.append({"type": "ineq", "fun": (lambda x, g=g, lim=lim: lim - g(x))})
+        elif op == ">=":
+            cons.append({"type": "ineq", "fun": (lambda x, g=g, lim=lim: g(x) - lim)})
+        else:
+            cons.append({"type": "eq", "fun": (lambda x, g=g, lim=lim: g(x) - lim)})
+    f = _make_quad_callable(obj_coef, n)
+    res = _min(f, np.asarray(x0, dtype=float), method="SLSQP",
+               bounds=list(zip(blo, bhi)), constraints=cons,
+               options={"maxiter": 200, "ftol": 1e-10})
+    return np.clip(res.x, blo, bhi)
+
+
 def _solve_with_ipopt(obj_coef, con_coef, cspecs, lo, hi, x0, n, minimize):
     """Express the quadratic surrogate model in Pyomo and solve with IPOPT."""
     from pyomo.environ import (ConcreteModel, Var, Objective, Constraint,

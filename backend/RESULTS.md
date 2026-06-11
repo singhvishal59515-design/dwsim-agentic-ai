@@ -11,10 +11,10 @@
 | Sessions invoking >=1 tool | 38% (30/78) | i.e. did real flowsheet/sim work (rest are Q&A) |
 | Turn duration | median 62s / mean 146s | latency |
 | Sessions with LLM-judge scores | 2 | independent quality check coverage |
-| &nbsp;&nbsp;judge: overall | 2.5/5 (n=2) | small sample — indicative only |
-| &nbsp;&nbsp;judge: physical_plausibility | 3.5/5 (n=2) | small sample — indicative only |
-| &nbsp;&nbsp;judge: property_package_correctness | 5/5 (n=2) | small sample — indicative only |
-| &nbsp;&nbsp;judge: completeness | 3/5 (n=2) | small sample — indicative only |
+| &nbsp;&nbsp;judge: overall | 2/5 (n=2) | small sample — indicative only |
+| &nbsp;&nbsp;judge: physical_plausibility | 2.5/5 (n=2) | small sample — indicative only |
+| &nbsp;&nbsp;judge: property_package_correctness | 3/5 (n=2) | small sample — indicative only |
+| &nbsp;&nbsp;judge: completeness | 2/5 (n=2) | small sample — indicative only |
 | &nbsp;&nbsp;judge: hallucination_absence | 1.5/5 (n=2) | small sample — indicative only |
 
 ## 2. Hydrogen (biogas-SMR) case study (`hydrogen_results.jsonl`)
@@ -29,7 +29,9 @@
 
 ## 3. Formal benchmark suite
 
-**Not yet run.** `eval_log.json["benchmark_results"]` is empty — the 25-task harness exists (`benchmark_tasks.py`) but no measured pass-rate has been recorded. This is the key missing artifact for an unqualified "objective achieved" claim. Run `/eval/benchmark/run-all` against a live DWSIM + LLM key to populate it.
+Pass-rate: **20% (5/25)** across 25 tasks (mode: **live**).
+
+Generate/refresh with `python run_benchmark_live.py` against a live DWSIM + LLM key.
 
 ## 4. Component-level correctness (unit tests)
 
