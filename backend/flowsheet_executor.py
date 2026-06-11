@@ -255,7 +255,7 @@ def execute_build_plan(plan: Dict[str, Any], bridge: Any,
         comps = s.get("compositions") or s.get("composition")
         if isinstance(comps, dict) and comps and hasattr(bridge, "set_stream_composition"):
             try:
-                r = bridge.set_stream_composition(tag=tag, composition=comps)
+                r = bridge.set_stream_composition(tag=tag, compositions=comps)
                 _step(f"composition[{tag}]",
                       bool(r.get("success", False)), r)
                 if not r.get("success", False):
