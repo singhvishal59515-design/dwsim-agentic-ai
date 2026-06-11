@@ -139,10 +139,23 @@ body.light .welcome-steps>span{background:#fff;border-color:#e2e8f0;color:#47556
 .example-btn.v4:hover{border-color:#7c3aed;color:#ddd6fe}
 
 /* Results table */
-.tab-row{display:flex;flex-wrap:wrap;align-content:flex-start;gap:2px;background:#0f172a;border-bottom:1px solid #334155;padding:4px 5px}
-.tab{padding:6px 11px;font-size:12px;cursor:pointer;color:#94a3b8;border-radius:6px;border-bottom:2px solid transparent;white-space:nowrap;transition:background .12s ease,color .12s ease}
-.tab:hover{background:#1e293b;color:#e2e8f0}
-.tab.active{color:#38bdf8;background:#1e293b;border-bottom:2px solid #38bdf8;font-weight:600}
+/* ── Two-tier tab navigation ─────────────────────────────────────────────── */
+.tab-group-row{display:flex;flex-wrap:wrap;gap:4px;background:#0b1120;border-bottom:1px solid #1e293b;padding:7px 8px 0}
+.tab-group{display:flex;align-items:center;gap:5px;padding:8px 16px;font-size:12.5px;font-weight:600;letter-spacing:.2px;cursor:pointer;color:#8595ad;border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;white-space:nowrap;transition:background .14s ease,color .14s ease}
+.tab-group:hover{background:#161f33;color:#e2e8f0}
+.tab-group.active{color:#e8f4ff;background:#0f172a;border-color:#243049;box-shadow:inset 0 2px 0 #38bdf8}
+.tab-group:focus-visible{outline:2px solid #38bdf8;outline-offset:-2px}
+/* Sub-tab row (contextual to the active group) */
+.tab-row{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3px;background:#0f172a;border-bottom:1px solid #243049;padding:6px 8px}
+.tab{padding:6px 13px;font-size:12px;cursor:pointer;color:#94a3b8;border-radius:7px;border:1px solid transparent;white-space:nowrap;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.tab:hover{background:#1b2640;color:#e2e8f0}
+.tab.active{color:#38bdf8;background:#13233b;border-color:#2b3f5e;font-weight:600}
+body.light .tab-group-row{background:#eef2f7;border-bottom-color:#dbe3ec}
+body.light .tab-group{color:#5b6b80}
+body.light .tab-group:hover{background:#e2e8f0;color:#1e293b}
+body.light .tab-group.active{color:#0b3a5c;background:#fff;border-color:#cdd8e4;box-shadow:inset 0 2px 0 #0ea5e9}
+body.light .tab-row{background:#f8fafc;border-bottom-color:#e2e8f0}
+body.light .tab.active{color:#0369a1;background:#e0f2fe;border-color:#bae6fd}
 body.light .tab:hover{background:#eef2f7;color:#1e293b}
 body.light .tab.active{background:#eef2f7}
 #results-body{overflow-x:auto}
@@ -821,36 +834,11 @@ body.light .kbd{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
 
   <!-- RIGHT: results panel -->
   <div id="right">
-    <div class="sec-title">Results &amp; Reports</div>
-    <div class="tab-row">
-      <span class="tab active" id="tab-streams" onclick="showTab('streams')" title="Material-stream results (T, P, flow, composition)">Streams</span>
-      <span class="tab" id="tab-unitops"    onclick="showTab('unitops')"    title="Unit-operation results and duties">⚙ Unit Ops</span>
-      <span class="tab" id="tab-parametric" onclick="showTab('parametric')" title="Parametric sweep results and charts">Parametric</span>
-      <span class="tab" id="tab-conv"       onclick="showTab('conv')"       title="Per-stream convergence status">Convergence</span>
-      <span class="tab" id="tab-diagram"    onclick="showTab('diagram')"    title="Flowsheet diagram">⬡ Diagram</span>
-      <span class="tab" id="tab-reports"    onclick="showTab('reports')"    title="Generated PDF / academic reports">Reports</span>
-      <span class="tab" id="tab-eval"       onclick="showTab('eval')"       title="Agent evaluation metrics and token usage">📊 Eval</span>
-      <span class="tab" id="tab-files"      onclick="showTab('files')"      title="Browse flowsheet files on disk">📁 Files</span>
-      <span class="tab" id="tab-economics"  onclick="showTab('economics')"  title="Capital and operating-cost economics">💰 Economics</span>
-      <span class="tab" id="tab-bayesian"   onclick="showTab('bayesian')"   title="Bayesian (GP-surrogate) optimization">🔬 Bayesian</span>
-      <span class="tab" id="tab-dwoptim"    onclick="showTab('dwoptim')"    title="DWSIM-native optimization (L-BFGS-B, Simplex, DE)">🎯 Optimize</span>
-      <span class="tab" id="tab-hydrogen"   onclick="showTab('hydrogen')"   title="Hydrogen-process analysis">⚛ H₂</span>
-      <span class="tab" id="tab-montecarlo" onclick="showTab('montecarlo')" title="Monte-Carlo uncertainty study">🎲 Monte Carlo</span>
-      <span class="tab" id="tab-pinch"      onclick="showTab('pinch')"      title="Pinch (energy-targeting) analysis">🌡 Pinch</span>
-      <span class="tab" id="tab-compare"    onclick="showTab('compare')"    title="Compare flowsheet scenarios">⚖ Compare</span>
-      <span class="tab" id="tab-accuracy"   onclick="showTab('accuracy')"   title="Accuracy vs reference values">✓ Accuracy</span>
-      <span class="tab" id="tab-literature" onclick="showTab('literature')" title="Compare results to literature">📚 Literature</span>
-      <span class="tab" id="tab-intent"     onclick="showTab('intent')"     title="Declared intent and verification">📋 Intent</span>
-      <span class="tab" id="tab-memory"     onclick="showTab('memory')"     title="Persistent goals and constraints">🧠 Memory</span>
-      <span class="tab" id="tab-knowledge"  onclick="showTab('knowledge')"  title="Chemical-engineering knowledge base">📖 Knowledge</span>
-      <span class="tab" id="tab-templates"  onclick="showTab('templates')"  title="Industrial process templates">🏭 Templates</span>
-      <span class="tab" id="tab-kinetics"   onclick="showTab('kinetics')"   title="Reaction-kinetics database">⚛ Kinetics</span>
-      <span class="tab" id="tab-pfd"        onclick="showTab('pfd')"        title="Auto-generated process-flow diagram">📐 PFD</span>
-      <span class="tab" id="tab-hen"        onclick="showTab('hen')"        title="Heat-exchanger-network synthesis">♨ HEN</span>
-      <span class="tab" id="tab-diagnose"   onclick="showTab('diagnose')"   title="Root-cause convergence diagnostics">🩺 Diagnose</span>
-      <span class="tab" id="tab-capeopen"   onclick="showTab('capeopen')"   title="CAPE-OPEN third-party integration">🔌 CAPE-OPEN</span>
-      <span class="tab" id="tab-tasks"      onclick="showTab('tasks')"      title="Background tasks (optimization, async simulation)">⚙ Tasks</span>
-    </div>
+    <div class="sec-title">Workspace</div>
+    <!-- Two-tier navigation: 6 category groups (built from TAB_GROUPS) over a
+         contextual sub-tab row. Populated by showTab()/_renderGroupBar(). -->
+    <div class="tab-group-row" id="tab-group-row" role="tablist"></div>
+    <div class="tab-row" id="tab-sub-row"></div>
     <div class="unit-toggle">
       <span class="unit-toggle-lbl">Units:</span>
       <button id="unit-btn-si"       class="unit-btn active" onclick="setUnitSystem('si')">SI</button>
@@ -2732,13 +2720,90 @@ function _safeRender(tabName, fn) {
   }
 }
 
+// ── Two-tier tab navigation model ──────────────────────────────────────────
+// 27 panels grouped into 6 categories. Every panel still renders into the
+// shared #results-body via its existing renderer; only the navigation chrome
+// changed. The contextual sub-tab row shows just the active group's tabs,
+// which fixes the "27 wrapped tabs" clutter and groups similar features.
+const TAB_GROUPS = [
+  { id:'results',  label:'📊 Results',  tabs:[
+    {id:'streams',    label:'Streams',      title:'Material-stream results (T, P, flow, composition)'},
+    {id:'unitops',    label:'⚙ Unit Ops',   title:'Unit-operation results and duties'},
+    {id:'conv',       label:'Convergence',  title:'Per-stream convergence status'},
+    {id:'diagram',    label:'⬡ Diagram',    title:'Flowsheet diagram'},
+    {id:'pfd',        label:'📐 PFD',        title:'Auto-generated process-flow diagram'},
+  ]},
+  { id:'optimize', label:'🎯 Optimize', tabs:[
+    {id:'dwoptim',    label:'Optimizer',    title:'DWSIM-native optimization (L-BFGS-B, Simplex, DE)'},
+    {id:'bayesian',   label:'🔬 Bayesian',  title:'Bayesian (GP-surrogate) optimization'},
+    {id:'montecarlo', label:'🎲 Monte Carlo',title:'Monte-Carlo uncertainty study'},
+    {id:'parametric', label:'Parametric',   title:'Parametric sweep results and charts'},
+  ]},
+  { id:'analysis', label:'🌡 Analysis', tabs:[
+    {id:'pinch',      label:'Pinch',        title:'Pinch (energy-targeting) analysis'},
+    {id:'hen',        label:'♨ HEN',        title:'Heat-exchanger-network synthesis'},
+    {id:'economics',  label:'💰 Economics', title:'Capital and operating-cost economics'},
+    {id:'diagnose',   label:'🩺 Diagnose',  title:'Root-cause convergence diagnostics'},
+  ]},
+  { id:'knowledge', label:'📖 Knowledge', tabs:[
+    {id:'knowledge',  label:'Knowledge Base',title:'Chemical-engineering knowledge base'},
+    {id:'templates',  label:'🏭 Templates', title:'Industrial process templates'},
+    {id:'kinetics',   label:'⚛ Kinetics',   title:'Reaction-kinetics database'},
+    {id:'literature', label:'📚 Literature', title:'Compare results to literature'},
+  ]},
+  { id:'validate', label:'✓ Validate', tabs:[
+    {id:'eval',       label:'📊 Eval',      title:'Agent evaluation metrics and token usage'},
+    {id:'accuracy',   label:'Accuracy',     title:'Accuracy vs reference values'},
+    {id:'compare',    label:'⚖ Compare',    title:'Compare flowsheet scenarios'},
+    {id:'intent',     label:'📋 Intent',    title:'Declared intent and verification'},
+    {id:'tasks',      label:'⚙ Tasks',      title:'Background tasks (optimization, async simulation)'},
+  ]},
+  { id:'system',   label:'⋯ More',      tabs:[
+    {id:'reports',    label:'Reports',      title:'Generated PDF / academic reports'},
+    {id:'files',      label:'📁 Files',     title:'Browse flowsheet files on disk'},
+    {id:'memory',     label:'🧠 Memory',    title:'Persistent goals and constraints'},
+    {id:'hydrogen',   label:'⚛ H₂',         title:'Hydrogen-process analysis'},
+    {id:'capeopen',   label:'🔌 CAPE-OPEN', title:'CAPE-OPEN third-party integration'},
+  ]},
+];
+const _TAB_TO_GROUP = {};
+TAB_GROUPS.forEach(g => g.tabs.forEach(t => { _TAB_TO_GROUP[t.id] = g.id; }));
+const _groupLastTab = {};                       // remember last tab per group
+function _groupOf(tabId){ return _TAB_TO_GROUP[tabId] || TAB_GROUPS[0].id; }
+
+function _renderGroupBar(activeGroup){
+  const row = document.getElementById('tab-group-row');
+  if (!row) return;
+  row.innerHTML = TAB_GROUPS.map(g =>
+    `<span class="tab-group${g.id===activeGroup?' active':''}" id="tabgrp-${g.id}" `
+    + `role="tab" tabindex="0" onclick="showGroup('${g.id}')" `
+    + `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showGroup('${g.id}')}" `
+    + `title="${g.label}">${g.label}</span>`
+  ).join('');
+}
+function _renderSubTabs(groupId, activeTab){
+  const row = document.getElementById('tab-sub-row');
+  if (!row) return;
+  const g = TAB_GROUPS.find(x => x.id===groupId) || TAB_GROUPS[0];
+  row.innerHTML = g.tabs.map(t =>
+    `<span class="tab${t.id===activeTab?' active':''}" id="tab-${t.id}" `
+    + `role="tab" tabindex="0" onclick="showTab('${t.id}')" `
+    + `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showTab('${t.id}')}" `
+    + `title="${t.title}">${t.label}</span>`
+  ).join('');
+}
+function showGroup(groupId){
+  const g = TAB_GROUPS.find(x => x.id===groupId) || TAB_GROUPS[0];
+  showTab(_groupLastTab[groupId] || g.tabs[0].id);   // restore or default tab
+}
+
 function showTab(t) {
   currentTab = t;
+  const grp = _groupOf(t);
+  _groupLastTab[grp] = t;
   try { localStorage.setItem('dwsim_lastTab', t); } catch (e) {}
-  ['streams','unitops','parametric','conv','diagram','reports','eval','files','economics','bayesian','dwoptim','hydrogen','montecarlo','pinch','compare','accuracy','literature','intent','memory','knowledge','templates','kinetics','pfd','hen','diagnose','capeopen','tasks'].forEach(id => {
-    const el = document.getElementById('tab-'+id);
-    if (el) el.classList.toggle('active', id === t);
-  });
+  _renderGroupBar(grp);
+  _renderSubTabs(grp, t);
   // Built at call time so every (hoisted) renderer is defined.
   const R = {
     streams: renderStreams, unitops: renderUnitOps, parametric: renderParametric,
@@ -7854,12 +7919,14 @@ const _TAB_GROUPS = [
 ];
 
 function _allTabIds() {
-  return Array.from(document.querySelectorAll('[id^="tab-"]'))
-    .map(el => el.id.replace('tab-', ''));
+  // Derive from the nav model — the DOM only holds the active group's sub-tabs.
+  return TAB_GROUPS.reduce((a, g) => a.concat(g.tabs.map(t => t.id)), []);
 }
 function _tabLabel(id) {
-  const el = document.getElementById('tab-' + id);
-  return el ? el.textContent.trim() : id;
+  for (const g of TAB_GROUPS) {
+    for (const t of g.tabs) if (t.id === id) return t.label;
+  }
+  return id;
 }
 
 // ── Reusable panel states ───────────────────────────────────────────────────
