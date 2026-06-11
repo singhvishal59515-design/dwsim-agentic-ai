@@ -903,28 +903,46 @@ class LLMClient:
         # Build kwargs conditionally: the Anthropic API rejects tools=None and
         # system=None ("Input should be a valid array"). Omit them entirely
         # when empty rather than passing None.
+        # Anthropic requires system content at the TOP LEVEL — a {"role":"system"}
+        # entry in the messages array is a 400 ("use the top-level system
+        # parameter"). The agent injects a dynamic "state card" as a system
+        # message into history, so pull every system-role message out of the
+        # conversation here and fold its content into the (uncached, dynamic)
+        # system text. Without this, anthropic fails on every turn after the
+        # first and the agent silently fails over.
+        inline_system = "\n\n".join(
+            m["content"] for m in messages
+            if m.get("role") == "system" and isinstance(m.get("content"), str))
+        conv = [m for m in messages if m.get("role") != "system"]
+
         kwargs = {
             "model":       self.model,
             "max_tokens":  4096,
-            "messages":    messages,
+            "messages":    conv,
             "temperature": self.temperature,  # Anthropic: 0.0–1.0
             "timeout":     _LLM_REQUEST_TIMEOUT_S,
         }
-        if system_prompt:
+        if system_prompt or inline_system:
             # Prompt caching: cache the large STABLE instruction prefix so it is
             # billed/processed once per ~5-min window instead of on every loop
             # iteration. The builder marks the split with CACHE_BREAKPOINT; the
-            # dynamic suffix (flowsheet state, RAG, memory) stays uncached. Blocks
-            # under the model's min cacheable size are silently not cached — safe.
-            if CACHE_BREAKPOINT in system_prompt:
+            # dynamic suffix (flowsheet state, RAG, memory, inline state card)
+            # stays uncached. Blocks under the model's min cacheable size are
+            # silently not cached — safe.
+            if system_prompt and CACHE_BREAKPOINT in system_prompt:
                 stable, dynamic = system_prompt.split(CACHE_BREAKPOINT, 1)
+                if inline_system:
+                    dynamic = (dynamic + "\n\n" + inline_system)
                 sys_blocks = [{"type": "text", "text": stable,
                                "cache_control": {"type": "ephemeral"}}]
                 if dynamic.strip():
                     sys_blocks.append({"type": "text", "text": dynamic})
                 kwargs["system"] = sys_blocks
             else:
-                kwargs["system"] = system_prompt
+                combined = system_prompt or ""
+                if inline_system:
+                    combined = (combined + "\n\n" + inline_system).strip()
+                kwargs["system"] = combined
         if at:                          # only include tools when non-empty
             # Cache the tool definitions too (a stable prefix segment): mark the
             # last tool so the whole block is cached up to that point.

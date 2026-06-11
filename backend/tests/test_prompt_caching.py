@@ -86,6 +86,37 @@ def test_anthropic_without_marker_uses_plain_string_system():
     assert c._client.captured["system"] == "plain system"
 
 
+def test_anthropic_folds_system_role_messages_into_top_level():
+    # The agent injects a "state card" as a role:system message; anthropic 400s
+    # if it stays in the messages array. It must be folded into `system`.
+    c = _anthropic_client()
+    msgs = [
+        {"role": "system", "content": "STATE CARD: flowsheet=demo"},
+        {"role": "user", "content": "build a heater"},
+    ]
+    c._chat_anthropic(msgs, [], "BASE")
+    cap = c._client.captured
+    # No system-role message may reach the messages array.
+    assert all(m["role"] != "system" for m in cap["messages"])
+    assert cap["messages"][0]["role"] == "user"
+    # The state card content must appear in the top-level system.
+    sys_text = (cap["system"] if isinstance(cap["system"], str)
+                else " ".join(b["text"] for b in cap["system"]))
+    assert "STATE CARD" in sys_text and "BASE" in sys_text
+
+
+def test_anthropic_folds_state_card_into_dynamic_block_with_cache():
+    c = _anthropic_client()
+    msgs = [{"role": "system", "content": "STATE CARD"},
+            {"role": "user", "content": "x"}]
+    c._chat_anthropic(msgs, [], "STABLE" + CACHE_BREAKPOINT + "dynamic")
+    blocks = c._client.captured["system"]
+    assert blocks[0]["text"] == "STABLE"
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    # State card lands in the uncached dynamic block (it changes every turn).
+    assert "STATE CARD" in blocks[1]["text"] and "cache_control" not in blocks[1]
+
+
 def test_marker_stripped_for_non_anthropic():
     # The chat() dispatch must strip the marker before a non-Anthropic provider
     # ever sees the system prompt.
