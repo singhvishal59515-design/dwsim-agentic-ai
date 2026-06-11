@@ -251,13 +251,11 @@ else:
 # reject `Access-Control-Allow-Origin: *` together with credentials), so disable
 # credentials whenever origins are wildcarded to keep the header set valid.
 _cors_wildcard = "*" in _cors_origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=not _cors_wildcard,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# NOTE: CORS is registered AFTER the auth middleware below, on purpose. Starlette
+# runs the most-recently-added middleware outermost, and CORS must be outermost
+# so that even a short-circuit 401 from the auth middleware still carries the
+# Access-Control-* headers — otherwise a cross-origin browser client sees an
+# opaque CORS error instead of the 401.
 
 # ── Optional bearer-token authentication ────────────────────────────────────
 from fastapi.requests import Request as _FastAPIRequest
@@ -293,6 +291,17 @@ else:
                          "error_code": "AUTH_REQUIRED"},
             )
         return await call_next(request)
+
+# Registered LAST so CORS is the outermost middleware (see note above): its
+# Access-Control-* headers are then applied to every response, including the
+# auth middleware's 401 short-circuit.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=not _cors_wildcard,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Global structured exception handler ────────────────────────────────────
 # Any uncaught exception from a route now returns a uniform structured
