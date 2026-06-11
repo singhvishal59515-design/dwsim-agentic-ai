@@ -3505,9 +3505,16 @@ class DWSIMBridgeV2:
         n_samples: int = 0,
         seed: int = 42,
         max_refine: int = 3,
+        method: str = "global",
     ) -> Dict[str, Any]:
         """
         Equation-oriented (EO) optimization — the Aspen-EO analogue.
+
+        method="global"        : global quadratic surrogate + adaptive refinement
+        method="trust_region"  : derivative-free TRUST-REGION surrogate EO —
+                                 local quadratic models with rho-based step
+                                 acceptance and adaptive radius (provably
+                                 convergent; better on nonlinear/coupled units).
 
         Builds a smooth ALGEBRAIC surrogate of the flowsheet from a
         Latin-hypercube DOE, then solves the optimisation + model SIMULTANEOUSLY
@@ -3557,10 +3564,15 @@ class DWSIMBridgeV2:
                     "constraint_values": [float(v) if v is not None else None
                                           for v in cvals]}
 
+        cspecs = [{"operator": c.get("operator", ">="), "value": c.get("value")}
+                  for c in cons]
+        if str(method).lower() in ("trust_region", "trust-region", "tr"):
+            from eo_optimizer import run_eo_trust_region
+            return run_eo_trust_region(
+                _evaluate, variables, constraint_specs=cspecs,
+                minimize=minimize, seed=int(seed))
         return run_eo_optimization(
-            _evaluate, variables,
-            constraint_specs=[{"operator": c.get("operator", ">="),
-                               "value": c.get("value")} for c in cons],
+            _evaluate, variables, constraint_specs=cspecs,
             minimize=minimize, n_samples=int(n_samples), seed=int(seed),
             max_refine=int(max_refine))
 

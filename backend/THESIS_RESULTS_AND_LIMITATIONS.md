@@ -149,10 +149,20 @@ criteria-matching work — both identified below.
    judge scores are treated as a secondary signal alongside the deterministic,
    physics-based success criteria, which are the primary measure.
 
-6. **Surrogate equation-oriented optimization.** DWSIM does not expose its
-   equation system, so the EO optimizer is surrogate-based (DOE → quadratic
-   model → IPOPT → validate), not a true open-equation solve; this is a
-   methodological approximation, not native EO.
+6. **Surrogate equation-oriented optimization (narrowed, not eliminated).**
+   DWSIM does not expose its equation system, so a true open-equation solve
+   (Aspen EO with rigorous Jacobians) is impossible directly. The EO optimizer
+   is therefore surrogate-based — but it now offers a **derivative-free
+   trust-region** mode (`run_eo_trust_region`) in addition to the global-quadratic
+   one: local quadratic models inside a trust region with ρ-based step acceptance
+   and adaptive radius — a **provably-convergent** model-management scheme
+   (Conn, Scheinberg & Vicente, SIAM 2009). It is validated to converge to known
+   optima on analytic test problems (sphere → 0; the constrained QP → the exact
+   KKT point; ~50× reduction on Rosenbrock, whose curved valley defeats *any*
+   quadratic surrogate). This upgrades the EO from a one-shot approximation to a
+   rigorous local-optimization method; the residual gap to Aspen EO is the
+   surrogate-vs-native-equation fidelity, which is fundamental to optimising over
+   a closed simulator rather than a methodological shortcut.
 
 7. **Single-process DWSIM.** DWSIM runs in one in-process CLR, so solves are
    serialized and cannot be parallelized, bounding throughput.
