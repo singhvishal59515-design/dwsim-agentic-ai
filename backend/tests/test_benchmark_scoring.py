@@ -51,6 +51,19 @@ def test_stream_criterion_naming_mismatch_is_distinguishable():
     assert "not found" in reason and "Outlet" in reason
 
 
+def test_role_explicit_alias_matches_but_generic_name_does_not():
+    """A role-explicit synonym ('Prod') scores fairly; a generic positional name
+    ('Outlet') must NOT match (ambiguous in multi-output flowsheets)."""
+    met, _ = rb._evaluate_criterion(
+        SC("Product", "temperature_C", "~=", 80.0, tolerance_pct=2.0),
+        _sr({"Prod": {"temperature_K": 353.15}}))
+    assert met is True                                  # Prod == Product role
+    met2, reason2 = rb._evaluate_criterion(
+        SC("Product", "temperature_C", "~=", 80.0, tolerance_pct=2.0),
+        _sr({"Outlet": {"temperature_K": 353.15}}))
+    assert met2 is False and "not found" in reason2     # generic name: no match
+
+
 def test_stream_criterion_physics_miss_reports_actual():
     met, reason = rb._evaluate_criterion(
         SC("Product", "pressure_bar", "~=", 5.0, tolerance_pct=2.0),

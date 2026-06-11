@@ -615,18 +615,57 @@ def get_results() -> Dict[str, Any]:
     }
 
 
+# Role-equivalent stream-name aliases. The benchmark criteria reference a stream
+# by role (e.g. "Product"); the agent may legitimately use a synonym. Matching
+# these role-equivalents (NOT arbitrary names) keeps scoring fair without
+# inviting false passes — every alias denotes the same role in the flowsheet.
+# Conservative on purpose: only role-EXPLICIT synonyms, never generic positional
+# names like "out"/"outlet"/"in"/"inlet" (ambiguous in multi-output flowsheets —
+# a column "outlet" could be distillate or bottoms), so a correct synonym scores
+# fairly without ever letting an ambiguous name produce a false pass.
+_STREAM_ALIASES = {
+    "product":    {"product", "prod", "product stream"},
+    "feed":       {"feed", "fresh feed", "feedstock", "feed stream"},
+    "distillate": {"distillate", "tops", "overhead", "ovhd", "distillate product",
+                   "top product"},
+    "bottoms":    {"bottoms", "btms", "residue", "bottom product"},
+}
+
+
+def _resolve_stream(stream_results: dict, stream_tag: str):
+    """Find the result record for a criterion's stream, tolerant of casing and
+    role-equivalent names. Returns the {prop:val} dict (flattening a nested
+    'properties' shape) or None."""
+    sr = stream_results or {}
+    def _rec(tag):
+        r = sr.get(tag)
+        if isinstance(r, dict):
+            return r.get("properties") if isinstance(r.get("properties"), dict) else r
+        return None
+    # 1. exact
+    r = _rec(stream_tag)
+    if r is not None:
+        return r
+    # 2. case-insensitive exact
+    low = {k.lower(): k for k in sr.keys()}
+    if stream_tag.lower() in low:
+        return _rec(low[stream_tag.lower()])
+    # 3. role-equivalent aliases (both directions)
+    want = stream_tag.lower()
+    alias_set = next((s for s in _STREAM_ALIASES.values() if want in s), {want})
+    for k in sr.keys():
+        if k.lower() in alias_set:
+            return _rec(k)
+    return None
+
+
 def _criterion_actual(criterion, stream_results: dict):
     """Best-effort read of a criterion's measured value from stream_results,
-    tolerant of the two shapes results come in ({tag:{prop:val}} or
-    {tag:{properties:{prop:val}}})."""
+    tolerant of result shape, stream-name casing, and role-equivalent names."""
     try:
-        rec = (stream_results or {}).get(criterion.stream_tag, {})
-        if isinstance(rec, dict):
-            if criterion.property in rec:
-                return rec[criterion.property]
-            props = rec.get("properties")
-            if isinstance(props, dict) and criterion.property in props:
-                return props[criterion.property]
+        rec = _resolve_stream(stream_results, criterion.stream_tag)
+        if isinstance(rec, dict) and criterion.property in rec:
+            return rec[criterion.property]
     except Exception:
         pass
     return None
