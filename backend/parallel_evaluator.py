@@ -10,10 +10,16 @@ of designs per step and are therefore starved by that serialization.
 
 This module runs N **separate worker processes**, each hosting its OWN pythonnet
 CLR and its OWN copy of the flowsheet (loaded once from a file), fed a queue of
-decision-variable vectors. Independent designs solve concurrently → ~N× wall
-clock on a batch, the single biggest practical speedup available (Aspen Plus
-doesn't parallelize a single flowsheet either; this beats it on population
-methods).
+decision-variable vectors. Independent designs solve concurrently.
+
+WHEN IT PAYS OFF (measured on real DWSIM): each worker must initialise its own
+CLR, costing ~30 s. So the pool only beats the single in-process CLR when that
+init is amortised — a PERSISTENT pool reused across many batches (e.g. NSGA-II
+generations) with non-trivial per-solve time. Rough breakeven:
+total_solve_work >= n_workers * ~30 s. For a one-shot SMALL/FAST batch the single
+CLR wins (a live 8 x 0.5 s batch came out ~9x SLOWER under 4 workers). The
+correctness guarantee (parallel == serial) holds regardless. To get the benefit,
+create the pool ONCE (ProcessPoolEvaluator context manager) and reuse `.map`.
 
 Design
 ------
@@ -113,16 +119,16 @@ def make_dwsim_evaluator(flowsheet_path: str,
     Initialises the bridge and loads the flowsheet ONCE (this runs in the worker
     initializer); the returned closure is then cheap to call per design."""
     from dwsim_bridge_v2 import DWSIMBridgeV2, _route_set_variable
+    from dwsim_native_optimizer import _read_object_property
     bridge = DWSIMBridgeV2(dll_folder=dll_folder)
     bridge.initialize()
     bridge.load_flowsheet(flowsheet_path)
     cons = constraint_specs or []
 
     def _read(tag, prop):
-        r = bridge.get_stream_properties(tag)
-        if not r.get("success"):
-            r = bridge.get_object_properties(tag)
-        return (r.get("properties", {}) or {}).get(prop)
+        # Robust read: stream/unit-op properties, with a .NET-reflection fallback
+        # for unit-op quantities (HeatDuty, etc.) the bulk readers don't expose.
+        return _read_object_property(bridge, tag, prop)
 
     def evaluate(x: Sequence[float]) -> Dict[str, Any]:
         for v, xi in zip(variables, x):
