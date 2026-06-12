@@ -70,7 +70,10 @@ tests requiring a live engine are skipped automatically.
   single pass (`MaximumIterations = 1`), solving once, and reading the
   recomputed tear stream — pending validation on a live recycle flowsheet.
 - *Parallel evaluator:* parallel batch results identical to serial (order
-  preserved); **1.9× with 4 workers** measured on a representative batch.
+  preserved). Speed-up is workload-dependent: 1.9× on a mock (no init cost) but
+  *slower* (0.11×) on a live 8-design DWSIM batch where per-worker CLR init
+  (~30 s) dominates — it pays off only with a persistent pool over many
+  generations (see Limitation #7).
 - *TAC objective:* the arithmetic (CRF, Turton power-law CAPEX, utility OPEX)
   matches hand calculation, and the project optimizer driven by a TAC objective
   finds the **exact cost-optimal equipment size** on a convex CAPEX↕OPEX
@@ -207,15 +210,18 @@ criteria-matching work — both identified below.
    Sobol sampling, parametric sweeps) by a **multi-process worker pool**
    (`parallel_evaluator.py`, `bridge.parallel_evaluate_designs`): N separate
    processes, each with its OWN CLR and its OWN copy of the flowsheet (loaded
-   once), evaluate a batch of designs concurrently. Validated for correctness
-   (parallel results identical to serial, order preserved) and speed-up
-   (measured **1.9× with 4 workers** on a representative batch; the gap from
-   the 4× ideal is fixed process-spawn overhead, which amortises as the per-
-   solve time and batch size grow — i.e. real DWSIM generations scale better
-   than this mock). The residual limit is that a *single* flowsheet solve is
-   still serial — but Aspen Plus does not parallelise a single solve either, so
-   on the population methods that dominate optimisation wall-clock this reaches
-   or exceeds the commercial baseline.
+   once), evaluate a batch of designs concurrently. Validated for **correctness**
+   (parallel results identical to serial, order preserved). On **speed-up the
+   live result is reported honestly and is nuanced**: a mock evaluator (no init
+   cost) showed 1.9× with 4 workers, but a LIVE 8-design batch on real DWSIM was
+   *slower* (0.11×) because each worker initialises its own CLR (~30 s), which
+   dwarfs a few fast solves. The pool therefore pays off only when that init is
+   amortised — a **persistent** pool reused across many generations of a
+   population optimiser with non-trivial per-solve time (rough breakeven ≈
+   n_workers × 30 s of total solve work); for one-shot small batches the single
+   in-process CLR wins. So it is a *correct, opt-in* parallel primitive whose
+   benefit is workload-dependent, not a blanket speed-up. (Aspen likewise does
+   not parallelise a single solve.)
 
 ## 6. Path to a Complete "Objective Achieved" Claim
 
