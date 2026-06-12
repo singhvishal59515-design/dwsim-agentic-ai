@@ -128,17 +128,22 @@ normalisation — but not, by itself, end-to-end task success.
 ### 2.4 Live 25-task benchmark
 
 Run crash-isolated (one subprocess per task) with Claude Sonnet as the agent LLM
-against a live DWSIM engine. **Strict pass-rate: 20 % (5/25)** — 5 SUCCESS, 2
-PARTIAL, 18 FAILURE_LOUD; by complexity 2/7, 3/11, 0/7.
+against a live DWSIM engine. Each agent request is ~22k tokens, so the LLM tier
+rate-limits part-way through the suite and **no single run completes all 25
+tasks** (whichever run first gets done). Two runs with complementary orderings
+(easy-first, advanced-first) were combined per task by scoring each task from the
+run where the agent actually executed it (tools > 0) — selecting a real attempt
+over a rate-limited no-op, not a higher score.
 
-This number **under-measures capability for two documented reasons**: (i) 9 of
-the 25 tasks (the most advanced) never ran because the LLM API rate-limited
-mid-suite — the agent's ~22k-token requests exhaust a standard tier; and (ii)
-several converged, correct builds scored null on exact-stream-tag criteria.
-Restricting to the **16 tasks the agent actually executed**, the rate is 5
-SUCCESS + 2 PARTIAL = **31 % strict / 44 % with partial credit**. The agent
-demonstrably builds and solves real DWSIM flowsheets (e.g. the water-heater and
-pump tasks pass cleanly against live physics).
+**Combined result: 24 % strict (6/25)** — 6 SUCCESS, 2 PARTIAL; by complexity
+**28.6 % / 36.4 % / 0 %**. A complexity-3/advanced task (C8-T01) is among the
+successes. **19 of 25 tasks were actually executed** across the two runs; **6
+never ran in either** (persistent rate-limiting on the most advanced) and are
+*inconclusive*, not failures. Over the **19 executed tasks: 32 % strict / 42 %
+with partial credit**. A residual scoring rigidity remains (some converged,
+correct builds score null when the output stream is named outside the role-alias
+set). The agent demonstrably builds and solves real DWSIM flowsheets (the
+water-heater and pump tasks pass cleanly against live physics).
 
 ## 3. Discussion and Limitations
 
@@ -153,7 +158,7 @@ industrial data the way Aspen is), and (b) **true native equation-oriented
 optimization** (DWSIM does not expose its equations; the EO here is surrogate).
 
 Honest threats to validity:
-- The 20 % benchmark is quota- and scoring-limited, not a clean capability
+- The 24 % benchmark (32 % over executed tasks) is quota- and scoring-limited, not a clean capability
   number; a higher-throughput LLM tier and further criteria-matching are needed
   for a complete headline figure.
 - The parallel speed-up is workload-dependent (CLR-init bound), corrected from an
