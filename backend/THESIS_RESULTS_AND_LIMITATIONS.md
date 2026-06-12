@@ -65,10 +65,18 @@ tests requiring a live engine are skipped automatically.
   converges the recycle at every step), with the loop closed to a residual of
   **0.0**, using **18 flowsheet passes vs 230 — a 12.8× reduction** (it avoids
   the inner convergence loop). It honours a process constraint and the recycle
-  closure simultaneously. *DWSIM integration spec:* drive `one_pass` by setting
-  the tear stream to the trial values, forcing the `OT_Recycle` block to a
-  single pass (`MaximumIterations = 1`), solving once, and reading the
-  recomputed tear stream — pending validation on a live recycle flowsheet.
+  closure simultaneously. *DWSIM integration — attempted live, corrected and
+  blocked:* a live exploration on the `reactor_recycle` flowsheet showed the
+  correct mechanism is an **open-loop build** (the recycle stream made a FIXED
+  feed set to the trial tear, with the recycle block removed) — **not**
+  `OT_Recycle MaximumIterations = 1` as first specified, because DWSIM's recycle
+  block auto-copies the computed stream to its output and so cannot hold an
+  independent tear guess. The open-loop flowsheet builds and converges, but the
+  **computed tear stream's molar flow reads back as null** (a "Vessel"-flash /
+  stream-read issue), which blocks forming the closure residual. So the live
+  coupling is **not yet achieved**; the method remains validated on the analytic
+  recycle, and the corrected integration path (open-loop + a working
+  computed-tear read) is the remaining work.
 - *Parallel evaluator:* parallel batch results identical to serial (order
   preserved). Speed-up is workload-dependent: 1.9× on a mock (no init cost) but
   *slower* (0.11×) on a live 8-design DWSIM batch where per-worker CLR init
