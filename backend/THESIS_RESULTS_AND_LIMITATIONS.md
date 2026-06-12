@@ -65,10 +65,22 @@ tests requiring a live engine are skipped automatically.
   converges the recycle at every step), with the loop closed to a residual of
   **0.0**, using **18 flowsheet passes vs 230 — a 12.8× reduction** (it avoids
   the inner convergence loop). It honours a process constraint and the recycle
-  closure simultaneously. *DWSIM integration spec:* drive `one_pass` by setting
-  the tear stream to the trial values, forcing the `OT_Recycle` block to a
-  single pass (`MaximumIterations = 1`), solving once, and reading the
-  recomputed tear stream — pending validation on a live recycle flowsheet.
+  closure simultaneously. *DWSIM integration — attempted live (5 runs), partial:*
+  the **optimizer mechanics are confirmed on the live engine** — the
+  infeasible-path SQP set the tear stream, ran a real DWSIM solve, read the
+  computed tear, and drove the closure residual to **0.0 in 2 passes**. Two
+  corrections came out of the live work: (i) the right mechanism is an
+  **open-loop build** (recycle stream made a fixed feed = trial tear, recycle
+  block removed), NOT `OT_Recycle MaximumIterations = 1` (DWSIM's recycle block
+  auto-copies its input to its output, so it can't hold an independent guess);
+  (ii) the computed tear reads via **mass flow** (`mass_flow_kg_s`), not molar
+  flow (null on that stream). **But the test flowsheet's open-loop form did not
+  COUPLE** — the computed tear (`UnconvFeed` mass) stayed constant regardless of
+  the recycle guess, so the closure that converged was trivial, not a real
+  recycle. A meaningful end-to-end live demonstration needs a flowsheet whose
+  open-loop computed tear genuinely depends on the guess; the method stays
+  rigorously validated on the analytic recycle (exact optimum, 12.8× fewer
+  passes).
 - *Parallel evaluator:* parallel batch results identical to serial (order
   preserved). Speed-up is workload-dependent: 1.9× on a mock (no init cost) but
   *slower* (0.11×) on a live 8-design DWSIM batch where per-worker CLR init
