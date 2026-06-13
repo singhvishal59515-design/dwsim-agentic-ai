@@ -2519,10 +2519,26 @@ def compound_props(name: str):
 
 @app.get("/property-packages")
 def prop_packages():
+    # The grounded registry (Aspen-mapped, with applicability) is the catalogue;
+    # cross-check against what the live engine actually installs so the UI never
+    # offers a package the engine lacks. (Previously imported a non-existent
+    # property_db.list_packages and always errored.)
     try:
-        from property_db import list_packages
-        return {"packages": list_packages()}
-    except Exception as exc: return {"packages": [], "error": str(exc)}
+        from thermo_models import catalogue, DWSIM_PACKAGES
+        cat = catalogue()
+        installed = list(DWSIM_PACKAGES)
+        try:
+            b = _bridge
+            if b is not None and getattr(b, "_mgr", None) is not None:
+                live = [str(p.Key) for p in b._mgr.AvailablePropertyPackages]
+                if live:
+                    installed = live
+        except Exception:
+            pass
+        return {"packages": installed, "n_packages": len(installed),
+                "catalogue": cat["packages"], "aspen_gaps": cat["aspen_gaps"]}
+    except Exception as exc:
+        return {"packages": [], "error": str(exc)}
 
 # ── Process library + Literature ────────────────────────────────────────────
 @app.get("/process-library")

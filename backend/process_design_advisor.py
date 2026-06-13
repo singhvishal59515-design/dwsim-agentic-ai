@@ -575,9 +575,28 @@ def property_package_selector(
                "Good (±2-5%)" if pp in ("Peng-Robinson (PR)", "SRK", "NRTL") else \
                "Moderate (±5-10% for VLE)"
 
+    # CRITICAL: the decision tree above can name models DWSIM cannot instantiate
+    # (e.g. "Electrolyte NRTL (eNRTL)", "Kent-Eisenberg", "Wong-Sandler PR",
+    # "SRK"). Route the recommendation through the grounded registry so the
+    # returned `recommended_pp` is ALWAYS a real DWSIM package the agent can pass
+    # straight to build_flowsheet_atomic, while preserving the ideal/Aspen name.
+    ideal_model = pp
+    dwsim_pp = pp
+    availability_note = ""
+    try:
+        from thermo_models import resolve_to_dwsim, is_available
+        if not is_available(pp):
+            r = resolve_to_dwsim(pp)
+            dwsim_pp = r["dwsim_name"]
+            availability_note = r["note"]
+    except Exception:
+        pass
+
     return {
         "success": True,
-        "recommended_pp": pp,
+        "recommended_pp": dwsim_pp,            # guaranteed DWSIM-instantiable
+        "ideal_model": ideal_model,            # what theory prefers (may be Aspen-only)
+        "availability_note": availability_note,
         "reason": reason,
         "accuracy_estimate": accuracy,
         "compounds_analysed": compounds,

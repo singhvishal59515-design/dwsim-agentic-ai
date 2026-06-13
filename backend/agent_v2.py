@@ -1616,6 +1616,9 @@ class DWSIMAgentV2:
                                               observe_props=None:
                                           self.bridge.multi_model_uncertainty(
                                               spec, property_packages, observe_props),
+            "thermo_method_assistant": lambda action="catalogue", model=None, **kw:
+                                          __import__("thermo_models").assistant(
+                                              action, model, **kw),
             "list_flowsheet_templates": self._list_flowsheet_templates,
             "create_from_template":   self._create_from_template,
             "generate_report":        lambda **kwargs:

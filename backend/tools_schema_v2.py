@@ -1958,6 +1958,47 @@ DWSIM_TOOLS = [
         },
     },
 
+    # ── Thermodynamic methods assistant (Aspen Methods Assistant equivalent) ─
+    {
+        "name": "thermo_method_assistant",
+        "description": (
+            "Thermodynamic property-method assistant (like Aspen's Methods "
+            "Assistant), grounded in the 28 packages DWSIM actually installs and "
+            "mapped to Aspen Plus method names. Three actions: "
+            "'catalogue' = full list of packages with family, Aspen equivalents, "
+            "what each is best/worst for, plus the honest Aspen-vs-DWSIM gaps "
+            "(e.g. true electrolyte ENRTL-RK, polymer methods); "
+            "'recommend' = pick a DWSIM-INSTANTIABLE package from system flags "
+            "(electrolyte, acid_gas_amine, polar, hydrocarbon, water_only, "
+            "natural_gas, refinery_heavy, have_binary_data, pressure_bar); "
+            "'resolve' = map a requested/Aspen model name (e.g. 'PENG-ROB', "
+            "'ELECNRTL', 'eNRTL') to the real DWSIM package name. Always returns "
+            "names the engine can use, so the agent never picks an unavailable "
+            "package."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": [],
+            "properties": {
+                "action":  {"type": "string",
+                            "enum": ["catalogue", "recommend", "resolve"],
+                            "description": "Default 'catalogue'."},
+                "model":   {"type": "string",
+                            "description": "For action='resolve': the requested/"
+                                           "Aspen model name to map to DWSIM."},
+                "electrolyte":     {"type": "boolean"},
+                "acid_gas_amine":  {"type": "boolean"},
+                "polar":           {"type": "boolean"},
+                "hydrocarbon":     {"type": "boolean"},
+                "water_only":      {"type": "boolean"},
+                "natural_gas":     {"type": "boolean"},
+                "refinery_heavy":  {"type": "boolean"},
+                "have_binary_data":{"type": "boolean"},
+                "pressure_bar":    {"type": "number"},
+            },
+        },
+    },
+
     # ── Multi-model thermodynamic uncertainty ───────────────────────────────
     {
         "name": "multi_model_uncertainty",
