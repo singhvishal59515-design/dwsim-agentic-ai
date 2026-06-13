@@ -88,6 +88,14 @@ class ReplayTurn:
     duration_s:   float
     llm_calls:    int                    # number of LLM round-trips
 
+    # ── Ablation tagging (optional; absent on pre-Phase-3 logs) ───────────────
+    # Which ablation condition / task / repetition produced this turn, so the
+    # JSONL can be grouped for the statistics in Phase 4. Defaulted so old logs
+    # (without these keys) still load via from_dict.
+    condition:    Optional[str] = None
+    task_id:      Optional[str] = None
+    rep:          Optional[int] = None
+
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         # Convert ToolCallRecord list to plain dicts
@@ -184,6 +192,9 @@ class TurnBuilder:
         model:       str,
         temperature: float,
         seed:        int,
+        condition:   Optional[str] = None,
+        task_id:     Optional[str] = None,
+        rep:         Optional[int] = None,
     ):
         self.turn_id     = uuid.uuid4().hex
         self.session_id  = session_id
@@ -192,6 +203,9 @@ class TurnBuilder:
         self.model       = model
         self.temperature = temperature
         self.seed        = seed
+        self.condition   = condition
+        self.task_id     = task_id
+        self.rep         = rep
 
         self._t0          = time.monotonic()
         self._timestamp   = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -272,6 +286,9 @@ class TurnBuilder:
             sf_violations   = sf_dicts,
             duration_s   = round(time.monotonic() - self._t0, 2),
             llm_calls    = self._llm_calls,
+            condition    = self.condition,
+            task_id      = self.task_id,
+            rep          = self.rep,
         )
 
 

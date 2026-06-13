@@ -3318,6 +3318,7 @@ class DWSIMAgentV2:
         # ── Reproducibility replay builder ────────────────────────────────────
         try:
             import replay_log as _rl
+            from ablation_config import ablation as _abl
             self._replay_builder = _rl.TurnBuilder(
                 session_id  = self._session_id,
                 turn_index  = self._turn_index,
@@ -3325,6 +3326,7 @@ class DWSIMAgentV2:
                 model       = getattr(self.llm, "model", ""),
                 temperature = getattr(self.llm, "temperature", 0.0),
                 seed        = getattr(self.llm, "_REPRODUCIBILITY_SEED", 42),
+                **_abl.tags(),   # condition / task_id / rep for ablation grouping
             )
         except Exception:
             self._replay_builder = None
@@ -4056,6 +4058,18 @@ class DWSIMAgentV2:
                 self._turn_client = primary_client
                 return resp
 
+        # Ablation provider lock: a defensible ablation pins ONE provider+model
+        # across all conditions, so silent cross-provider failover (which would
+        # swap the model under test mid-study) must be disabled. When locked,
+        # the turn fails on the primary rather than failing over.
+        try:
+            from ablation_config import ablation as _abl
+            if _abl.lock_provider:
+                self._skipped_providers["failover"] = "provider locked (ablation)"
+                return None
+        except Exception:
+            pass
+
         # Cross-provider failover — only if primary exhausted retries AND
         # enough budget remains. SDK setup for a new provider can itself
         # take seconds (DNS, TLS, key validation), so require >= 5s of
@@ -4172,6 +4186,15 @@ class DWSIMAgentV2:
         if budget_t0 is None:
             budget_t0 = time.monotonic()
 
+        # Ablation determinism: in deterministic mode every attempt uses
+        # temperature 0 (no retry-temperature diversity), so a repeated run is
+        # reproducible. Otherwise the normal diversity schedule is preserved.
+        try:
+            from ablation_config import ablation as _abl
+            _temps = _abl.retry_temperatures(_RETRY_TEMPERATURES)
+        except Exception:
+            _temps = _RETRY_TEMPERATURES
+
         for attempt in range(_LLM_MAX_ATTEMPTS):
             # Check aggregate budget before each attempt
             elapsed = time.monotonic() - budget_t0
@@ -4182,7 +4205,7 @@ class DWSIMAgentV2:
                 )
                 break
 
-            retry_temp = _RETRY_TEMPERATURES[min(attempt, len(_RETRY_TEMPERATURES) - 1)]
+            retry_temp = _temps[min(attempt, len(_temps) - 1)]
             _orig_temp = getattr(llm_client, "temperature", 0.0)
             if attempt > 0 and retry_temp > 0:
                 llm_client.temperature = retry_temp
