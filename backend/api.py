@@ -358,8 +358,20 @@ def health():
                   or getattr(b, "_active_alias", None)
                   or getattr(getattr(b, "state", None), "name", None))
             st = getattr(b, "state", None)
-            pp = (getattr(b, "current_property_package", None)
-                  or getattr(st, "property_package", None))
+            # Read the property package LIVE from the flowsheet. The cached
+            # `current_property_package`/state attribute is never populated on
+            # load, so /health always reported property_package:"None" even with
+            # a package set (reproduced on simple_heater). Fall back to the cache
+            # only if the live read yields nothing usable.
+            pp = None
+            try:
+                if hasattr(b, "get_property_package"):
+                    pp = (b.get_property_package() or {}).get("property_package")
+            except Exception:
+                pp = None
+            if not pp or pp in ("None", "Unknown"):
+                pp = (getattr(b, "current_property_package", None)
+                      or getattr(st, "property_package", None) or pp)
     except Exception: pass
     tool_count = None
     try:

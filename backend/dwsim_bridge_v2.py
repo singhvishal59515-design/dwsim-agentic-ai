@@ -921,6 +921,43 @@ class DWSIMBridgeV2:
         # a *solved* flowsheet does not block a fresh new_flowsheet call.
         self._building: bool = False
 
+        # BUG #6: track whether the flowsheet has been modified since the last
+        # solve, so reads of calculated properties (enthalpy, density, downstream
+        # streams) can warn that they are stale instead of returning silently
+        # out-of-date numbers. Marked on every successful write, cleared on a
+        # successful solve, and stamped onto get_stream responses.
+        try:
+            from bridge_patches_v4 import DirtyState
+            self._dirty = DirtyState()
+        except Exception:
+            self._dirty = None
+
+    def _mark_dirty(self, reason: str) -> None:
+        if self._dirty is not None:
+            try: self._dirty.mark(reason)
+            except Exception: pass
+
+    def _clear_dirty(self) -> None:
+        if self._dirty is not None:
+            try: self._dirty.clear()
+            except Exception: pass
+
+    def _stamp_dirty(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        if self._dirty is not None:
+            try: return self._dirty.stamp(response)
+            except Exception: return response
+        return response
+
+    def _known_objects_split(self):
+        """BUG #7: category-aware {streams, unit_ops} tag lists for error
+        suggestions, so unit-op tags never appear in 'stream not found' hints."""
+        try:
+            from bridge_patches_v4 import split_known_objects
+            return split_known_objects(self.list_objects())
+        except Exception:
+            tags = list(self._active_tag_cache().values())[:20]
+            return {"known_streams": tags, "known_unit_ops": []}
+
     # ── shortcuts to active flowsheet ─────────────────────────────────────────
 
     def _purge_stale_flowsheets(self, keep_alias: Optional[str] = None) -> None:
@@ -1660,11 +1697,15 @@ class DWSIMBridgeV2:
                 continue
             cat = (o.get("category") or "").lower()
             tn  = (o.get("type")     or "").lower()
-            if "stream" in cat or "materialstream" in tn or tn == "stream":
-                streams.append(o)
-            elif cat == "energy" or "energystream" in tn:
-                # Energy streams aren't decision variables; skip
+            # Energy streams MUST be tested before the generic material-stream
+            # check: "stream" is a substring of "energystream", so the old
+            # `"stream" in cat` test bucketed energy streams into streams[] and
+            # offered them as decision variables. They are not material streams.
+            if "energystream" in tn or "energystream" in cat or cat == "energy":
                 continue
+            if "materialstream" in tn or "materialstream" in cat \
+                    or tn == "stream" or cat == "stream":
+                streams.append(o)
             else:
                 unit_ops.append(o)
         return {
@@ -1680,9 +1721,12 @@ class DWSIMBridgeV2:
     def get_stream_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)
         if obj is None:
-            known = list(self._active_tag_cache().values())[:20]
+            # BUG #7: keep unit-op tags out of the stream suggestion list.
+            k = self._known_objects_split()
             return {"success": False,
-                    "error": f"Stream '{tag}' not found. Known: {known}"}
+                    "error": (f"Stream '{tag}' not found. "
+                              f"Known streams: {k['known_streams']}. "
+                              f"(Unit operations, not streams: {k['known_unit_ops']})")}
 
         props: Dict[str, Any] = {"tag": tag}
         try:
@@ -1771,7 +1815,8 @@ class DWSIMBridgeV2:
                 "Some properties are None — stream may not have converged. "
                 "Run simulation first or check recycle loop convergence."
             )
-        return result
+        # BUG #6: warn if the flowsheet was modified since the last solve.
+        return self._stamp_dirty(result)
 
     def get_object_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)
@@ -1812,9 +1857,12 @@ class DWSIMBridgeV2:
         """
         obj = self._find_object(tag)
         if obj is None:
+            # BUG #7: keep unit-op tags out of the stream suggestion list.
+            k = self._known_objects_split()
             return {"success": False,
-                    "error": f"Stream '{tag}' not found. "
-                             f"Known: {list(self._active_tag_cache().values())[:20]}"}
+                    "error": (f"Stream '{tag}' not found. "
+                              f"Known streams: {k['known_streams']}. "
+                              f"(Unit operations, not streams: {k['known_unit_ops']})")}
 
         # Capture old value for undo support BEFORE we write the new one
         old_value: Any = None
@@ -1827,16 +1875,29 @@ class DWSIMBridgeV2:
                 "molarflow":   "molar_flow_kmolh",
                 "vaporfraction": "vapor_fraction",
             }
+            # BUG #2 root cause: get_stream_properties nests values under
+            # "properties", so the old top-level lookup was always None and
+            # old_value was reported null on every write. Read the nested dict.
+            old_flat = old_props.get("properties", old_props) if isinstance(old_props, dict) else {}
             lookup_key = _PROP_TO_KEY.get(property_name.lower().replace(" ", "").replace("_", ""))
-            if lookup_key and old_props.get(lookup_key) is not None:
-                old_value = old_props[lookup_key]
+            if lookup_key and old_flat.get(lookup_key) is not None:
+                old_value = old_flat[lookup_key]
         except Exception:
             pass
 
         si_value, si_unit, dot_attr = _convert_to_si(property_name, value, unit)
         if dot_attr is None:
-            return {"success": False,
-                    "error": f"Unknown property '{property_name}'"}
+            # BUG #5: case-insensitive resolve with a did-you-mean suggestion
+            # instead of a bare "Unknown property".
+            err = f"Unknown property '{property_name}'"
+            try:
+                from bridge_patches_v4 import PropertyNames
+                _canon, _msg = PropertyNames.resolve(property_name)
+                if _msg:
+                    err = _msg
+            except Exception:
+                pass
+            return {"success": False, "error": err}
 
         # Physical validation — reject impossible values before touching the solver.
         # SI basis: T in K, P in Pa, flows in kg/s or mol/s, VF dimensionless [0,1].
@@ -1951,11 +2012,46 @@ class DWSIMBridgeV2:
                     "error": f"Could not set '{dot_attr}' on '{tag}'",
                     "tried": tried}
 
-        return {"success": True,
-                "message":   f"Set {property_name}={value}{unit} on '{tag}'",
-                "old_value": old_value,
-                "new_value": value,
-                "methods":   tried[:3]}
+        # BUG #2: read the value back through the SAME getter and verify it
+        # actually persisted, rather than echoing the requested value as if it
+        # had. A property that is calculated (not specifiable) on this stream
+        # will silently not change — surface that instead of reporting success.
+        # Compare in SI (si_value) against the SI read-back key, so a write in
+        # any unit (kg/s vs kg/h, K vs C) verifies correctly.
+        _SI_KEY = {"Temperature": "temperature_K", "Pressure": "pressure_Pa",
+                   "MassFlow": "mass_flow_kg_s", "MolarFlow": "molar_flow_mol_s",
+                   "VaporFraction": "vapor_fraction"}
+        read_back: Any = None
+        verified: Optional[bool] = None
+        try:
+            rb_props = self.get_stream_properties(tag)
+            rb_flat = rb_props.get("properties", rb_props) if isinstance(rb_props, dict) else {}
+            rb_key = _SI_KEY.get(dot_attr)
+            if rb_key and rb_flat.get(rb_key) is not None:
+                read_back = rb_flat[rb_key]
+                verified = abs(float(read_back) - float(si_value)) <= \
+                    1e-4 * max(abs(float(si_value)), 1.0)
+        except Exception:
+            pass
+
+        # BUG #6: a successful spec write makes calculated properties stale.
+        self._mark_dirty(f"set {tag}.{property_name}={value}{unit}")
+
+        result = {"success": True,
+                  "message":     f"Set {property_name}={value}{unit} on '{tag}'",
+                  "old_value":   old_value,
+                  "requested":   value,
+                  "new_value":   value,
+                  "read_back_si": read_back,
+                  "read_back_si_unit": si_unit,
+                  "verified":    verified,
+                  "methods":     tried[:3]}
+        if verified is False:
+            result["warning"] = (
+                f"Write-verification: requested {si_value:g} {si_unit} but read "
+                f"back {read_back} {si_unit}. '{property_name}' may be a "
+                f"calculated (not specifiable) property on this stream.")
+        return result
 
     def set_unit_op_property(self, tag: str, property_name: str,
                              value: Any, unit: str = "") -> Dict[str, Any]:
@@ -1971,6 +2067,11 @@ class DWSIMBridgeV2:
         obj = self._find_object(tag)
         if obj is None:
             return {"success": False, "error": f"Object '{tag}' not found"}
+        # BUG #6: modifying a unit-op spec invalidates the last solve. Marked at
+        # entry (the method's purpose is to mutate) and cleared on the next
+        # successful solve; a false mark on a failed write only costs a redundant
+        # solve, never a stale-but-silent read.
+        self._mark_dirty(f"set {tag}.{property_name}={value}{unit}")
         # LLM sometimes passes numeric values as strings — coerce to float/int
         if isinstance(value, str):
             try:
@@ -2643,11 +2744,35 @@ class DWSIMBridgeV2:
             if physical_issues:
                 warnings.append({"tag": tag, "issues": physical_issues})
 
+        # Unit operations were previously never checked: only self.state.streams
+        # was iterated, so an unconverged heater/column/reactor never surfaced
+        # and convergence_check could report all_converged with a unit op that
+        # had not solved (e.g. H-101 absent entirely). Iterate the unit ops and
+        # use the .NET `Calculated` flag DWSIM sets after a successful solve.
+        unit_ops_status = []
+        for tag in getattr(self.state, "unit_ops", []) or []:
+            obj = self._find_object(tag)
+            if obj is None:
+                missing.append(tag)
+                unit_ops_status.append({"tag": tag, "calculated": None,
+                                        "note": "not found"})
+                continue
+            try:
+                calc = bool(getattr(obj, "Calculated", False))
+            except Exception:
+                calc = False
+            unit_ops_status.append({"tag": tag, "calculated": calc})
+            if calc:
+                converged.append(tag)
+            else:
+                not_converged.append({"tag": tag, "missing": ["not calculated"]})
+
         all_ok = len(not_converged) == 0 and len(missing) == 0
         return {
             "all_converged":   all_ok,
             "converged":       converged,
             "not_converged":   not_converged,
+            "unit_ops":        unit_ops_status,
             "inaccessible":    missing,
             "physical_warnings": warnings,
         }
@@ -5646,6 +5771,7 @@ class DWSIMBridgeV2:
                         "noise to exact 0.0 or 1.0 (SF-05 auto-correction). "
                         "Original values stored in stream._sf05_original_vf."
                     )
+                self._clear_dirty()   # BUG #6: solve succeeded — reads are fresh
                 return result
             else:
                 return {"success": False,
@@ -5660,6 +5786,7 @@ class DWSIMBridgeV2:
                         with redirect_stdout(_sink), redirect_stderr(_sink):
                             fn(fs)
                         self._building = False   # build phase done
+                        self._clear_dirty()      # BUG #6: solve succeeded
                         sr = self.get_simulation_results()
                         return {
                             "success":        True,
