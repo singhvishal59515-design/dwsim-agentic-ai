@@ -5940,6 +5940,89 @@ class DWSIMBridgeV2:
 
     # ── Atomic flowsheet build ────────────────────────────────────────────────
 
+    def multi_model_uncertainty(
+        self,
+        spec: Dict[str, Any],
+        property_packages: Optional[List[str]] = None,
+        observe_props: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Quantify THERMODYNAMIC model-form uncertainty: build and solve the SAME
+        flowsheet `spec` (build_flowsheet_atomic shape) under several property
+        packages and report, for every stream output, the spread across models.
+
+        This is the honest counter to a commercial tool's validated-thermo edge —
+        instead of claiming fidelity parity, it tells the user how much a result
+        depends on the package choice (robust vs model-dependent), in one call.
+
+        property_packages : default ["Peng-Robinson (PR)", "Soave-Redlich-Kwong
+                            (SRK)", "NRTL"], filtered to what DWSIM has installed.
+        observe_props     : stream properties to compare; default T/P/flow/VF.
+        """
+        import copy as _copy
+        if not isinstance(spec, dict) or not spec.get("objects") or not spec.get("compounds"):
+            return {"success": False,
+                    "error": "A full spec (compounds + objects) is required — the "
+                             "same shape as build_flowsheet_atomic. Build the "
+                             "flowsheet from a spec first, then pass that spec."}
+
+        default_pkgs = ["Peng-Robinson (PR)", "Soave-Redlich-Kwong (SRK)", "NRTL"]
+        pkgs = list(property_packages or default_pkgs)
+        try:
+            avail = [str(p.Key) for p in self._mgr.AvailablePropertyPackages]
+        except Exception:
+            avail = []
+        if avail:
+            matched = [p for p in pkgs
+                       if any(p.lower() in a.lower() or a.lower() in p.lower()
+                              for a in avail)]
+            pkgs = matched or pkgs
+        # de-dupe, preserve order
+        pkgs = list(dict.fromkeys(pkgs))
+        observe_props = observe_props or ["temperature_C", "pressure_bar",
+                                          "mass_flow_kgh", "vapor_fraction"]
+
+        per_model: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        model_status: Dict[str, str] = {}
+        base_name = str(spec.get("name") or "mmu")
+
+        for pp in pkgs:
+            s = _copy.deepcopy(spec)
+            s["property_package"] = pp
+            s["name"] = f"{base_name}_{''.join(ch if ch.isalnum() else '_' for ch in pp)[:24]}"
+            try:
+                r = self.build_flowsheet_atomic(s)
+            except Exception as exc:
+                model_status[pp] = f"build raised: {exc}"
+                continue
+            solved = bool(r.get("success") and
+                          (r.get("converged") or r.get("solved")
+                           or r.get("stream_results")))
+            if not solved:
+                model_status[pp] = (f"did not solve: "
+                                    f"{r.get('error') or r.get('build_errors')}")
+                continue
+            obs: Dict[str, Dict[str, Any]] = {}
+            for tag in (self.state.streams or []):
+                gp = self.get_stream_properties(tag)
+                props = gp.get("properties", {}) if isinstance(gp, dict) and gp.get("success") else {}
+                sel = {k: props.get(k) for k in observe_props if props.get(k) is not None}
+                if sel:
+                    obs[tag] = sel
+            per_model[pp] = obs
+            model_status[pp] = "ok"
+
+        if len(per_model) < 2:
+            return {"success": False,
+                    "error": "Fewer than two packages solved — cannot compare "
+                             "models. See model_status for why.",
+                    "model_status": model_status}
+
+        from multimodel_uncertainty import aggregate_model_spread
+        agg = aggregate_model_spread(per_model)
+        agg["model_status"] = model_status
+        return agg
+
     def build_flowsheet_atomic(self, spec: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build, connect, configure, and solve a flowsheet in one call.

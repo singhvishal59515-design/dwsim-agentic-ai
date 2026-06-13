@@ -1612,6 +1612,10 @@ class DWSIMAgentV2:
             "save_and_solve":         lambda: self.bridge.save_and_solve(),
             "build_flowsheet_atomic": lambda **spec:
                                           self.bridge.build_flowsheet_atomic(spec),
+            "multi_model_uncertainty": lambda spec, property_packages=None,
+                                              observe_props=None:
+                                          self.bridge.multi_model_uncertainty(
+                                              spec, property_packages, observe_props),
             "list_flowsheet_templates": self._list_flowsheet_templates,
             "create_from_template":   self._create_from_template,
             "generate_report":        lambda **kwargs:

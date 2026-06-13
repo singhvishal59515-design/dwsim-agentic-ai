@@ -22,12 +22,15 @@ been exercised on a real flowsheet (gated on LLM/engine throughput).
 | **Property methods / data regression** | DWSIM property packages; compound DB (`property_db`), BIP setting | Bounded by DWSIM's property data coverage — narrower than Aspen's databanks |
 | **Natural-language / autonomous workflow** | The agent: NL goal → spec → gates → solve → verify → report, with hollow-objective detection and adaptive replanning | Aspen has **none** of this; the project's distinguishing contribution |
 | **Model/thermo fidelity** | DWSIM engine | **The ceiling.** DWSIM's thermo is not validated against decades of industrial data the way Aspen's is — fundamental, not closable by code |
+| **Thermo model-form uncertainty** | `multi_model_uncertainty` — solve the same flowsheet under several property packages and report the per-output spread (robust vs model-dependent) | The honest move *around* the fidelity ceiling: rather than claim parity, it **measures** how much a result depends on the package choice, in one call. Aspen does not surface this as a single command. **Live-validated** (water heater under PR/SRK/Steam Tables; correctly reports robustness when the result is robust; unit-tested to flag genuinely model-dependent outputs) |
 
 ## Defensible reading
 
 - **Where the system matches or exceeds Aspen:** modern/global + multi-objective
   optimization breadth, global sensitivity, the infeasible-path and trust-region
-  contributions, and — uniquely — natural-language autonomous operation.
+  contributions, one-command **thermo model-form uncertainty** (turning the
+  fidelity ceiling into a measured number Aspen does not surface), and —
+  uniquely — natural-language autonomous operation.
 - **Where Aspen remains decisively ahead, fundamentally:** model/thermo fidelity
   and true native equation-oriented optimization. Both stem from building *on*
   DWSIM rather than replacing it; no amount of optimizer engineering closes them.

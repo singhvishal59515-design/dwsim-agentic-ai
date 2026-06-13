@@ -1958,6 +1958,51 @@ DWSIM_TOOLS = [
         },
     },
 
+    # ── Multi-model thermodynamic uncertainty ───────────────────────────────
+    {
+        "name": "multi_model_uncertainty",
+        "description": (
+            "Quantify THERMODYNAMIC model-form uncertainty: build and solve the "
+            "SAME flowsheet under several property packages and report how much "
+            "each output moves with the package choice. Returns per-output spread "
+            "(mean, std, range, relative-spread %) and whether the result is "
+            "ROBUST (insensitive to the model) or MODEL-DEPENDENT. "
+            "Use when the user asks 'how much does my result depend on the "
+            "thermo package?', 'is Peng-Robinson good enough here?', or wants a "
+            "defensible uncertainty statement for a report. Takes the SAME spec "
+            "shape as build_flowsheet_atomic (the property_package field is "
+            "overridden per model). Note: it runs one full build+solve per "
+            "package, so 3 packages ≈ 3 solves."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["spec"],
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "description": ("Flowsheet spec (build_flowsheet_atomic shape: "
+                                    "compounds, objects, connections, feed_specs, "
+                                    "unit_op_specs). property_package is overridden "
+                                    "per model and may be omitted."),
+                },
+                "property_packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": ("Packages to compare, e.g. ['Peng-Robinson "
+                                    "(PR)', 'Soave-Redlich-Kwong (SRK)', 'NRTL']. "
+                                    "Default is that trio, filtered to installed."),
+                },
+                "observe_props": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": ("Stream properties to compare. Default "
+                                    "['temperature_C','pressure_bar',"
+                                    "'mass_flow_kgh','vapor_fraction']."),
+                },
+            },
+        },
+    },
+
     # ── Compound Property Database ───────────────────────────────────────────
     {
         "name": "get_compound_properties",
