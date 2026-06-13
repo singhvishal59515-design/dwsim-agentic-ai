@@ -79,6 +79,29 @@ class _Ablation:
             return tuple(0.0 for _ in default)
         return tuple(default)
 
+    # ── condition toggles (Phase 4) ──────────────────────────────────────────
+    # The four ablation conditions, selected entirely by DWSIM_ABLATION_CONDITION:
+    #   "full"       — everything on (also the default when no condition is set)
+    #   "no_rag"     — retrieval-augmented generation disabled
+    #   "no_safety"  — the SafetyValidator post-solve checks disabled
+    #   "direct_llm" — bare LLM: no tools, no RAG, no SafetyValidator (the
+    #                  "does the agentic apparatus help at all?" baseline)
+    @property
+    def direct_llm(self) -> bool:
+        return self.condition == "direct_llm"
+
+    @property
+    def disable_rag(self) -> bool:
+        return self.condition == "no_rag" or self.direct_llm
+
+    @property
+    def disable_safety(self) -> bool:
+        return self.condition == "no_safety" or self.direct_llm
+
+    @property
+    def disable_tools(self) -> bool:
+        return self.direct_llm
+
     # ── replay-log tagging ───────────────────────────────────────────────────
     def tags(self) -> Dict[str, Any]:
         return {"condition": self.condition,

@@ -1,0 +1,64 @@
+{
+  "task_id": "C2-T01",
+  "category": "multi_unit_creation",
+  "complexity": 2,
+  "prompt": "Create a water heating then cooling cycle: heat water from 20°C to 90°C, then cool back to 40°C. Feed 2 kg/s at 1 atm. Use Steam Tables.",
+  "property_package": "Steam Tables (IAPWS-IF97)",
+  "success_criteria": [
+    {
+      "stream_tag": "HotProduct",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 90.0,
+      "tolerance_pct": 2.0,
+      "description": "After heater T ≈ 90°C"
+    },
+    {
+      "stream_tag": "CoolProduct",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 40.0,
+      "tolerance_pct": 2.0,
+      "description": "After cooler T ≈ 40°C"
+    },
+    {
+      "stream_tag": "CoolProduct",
+      "property": "mass_flow_kgh",
+      "operator": "~=",
+      "value": 7200.0,
+      "tolerance_pct": 1.0,
+      "description": "Mass balance 7200 kg/h"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "T_heater_out > T_feed",
+      "check_type": "T_order",
+      "params": {
+        "hot": "HotProduct",
+        "cold": "Feed"
+      }
+    },
+    {
+      "description": "T_cooler_out < T_heater_out",
+      "check_type": "T_order",
+      "params": {
+        "hot": "HotProduct",
+        "cold": "CoolProduct"
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 25.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

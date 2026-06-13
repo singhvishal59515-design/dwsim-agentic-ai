@@ -1,0 +1,26 @@
+{
+  "task_id": "C3-T02",
+  "category": "flowsheet_analysis",
+  "complexity": 1,
+  "prompt": "What thermodynamic property package is used in the loaded flowsheet? Is it appropriate for the compounds present?",
+  "property_package": "any",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "contains_PP_name",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent correctly names the property package"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "get_property_package",
+    "search_knowledge"
+  ],
+  "human_time_min": 5.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

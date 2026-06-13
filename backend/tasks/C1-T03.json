@@ -1,0 +1,66 @@
+{
+  "task_id": "C1-T03",
+  "category": "single_unit_creation",
+  "complexity": 1,
+  "prompt": "Create a methanol-water flash separator at 70°C, 1 atm. Feed: 60 mol% methanol, 40 mol% water, 1 mol/s. Use NRTL.",
+  "property_package": "NRTL",
+  "success_criteria": [
+    {
+      "stream_tag": "Vapor",
+      "property": "vapor_fraction",
+      "operator": "~=",
+      "value": 1.0,
+      "tolerance_pct": 2.0,
+      "description": "Vapor outlet is fully vapour"
+    },
+    {
+      "stream_tag": "Liquid",
+      "property": "vapor_fraction",
+      "operator": "~=",
+      "value": 0.0,
+      "tolerance_pct": 2.0,
+      "description": "Liquid outlet is fully liquid"
+    },
+    {
+      "stream_tag": "Vapor",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 70.0,
+      "tolerance_pct": 2.0,
+      "description": "Vapour T ≈ 70°C"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Mole fractions sum to 1",
+      "check_type": "mass_balance",
+      "params": {
+        "feed": "Feed",
+        "outlets": [
+          "Vapor",
+          "Liquid"
+        ]
+      }
+    },
+    {
+      "description": "VF in [0,1] for all streams",
+      "check_type": "VF_range",
+      "params": {
+        "min": 0.0,
+        "max": 1.0
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "save_and_solve"
+  ],
+  "human_time_min": 18.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

@@ -5685,7 +5685,14 @@ class DWSIMBridgeV2:
         # ── Pre-solve silent-failure prevention (SF-02, SF-06, SF-07) ───────
         # Run before the expensive solve so we can surface problems loudly
         # instead of returning a convergent-but-wrong result.
-        pre_warnings = self._pre_solve_sf_check()
+        # Ablation: the no_safety / direct_llm condition disables this too, so
+        # the SafetyValidator contributes nothing in that condition.
+        try:
+            from ablation_config import ablation as _abl_pre
+            _pre_safety_off = _abl_pre.disable_safety
+        except Exception:
+            _pre_safety_off = False
+        pre_warnings = [] if _pre_safety_off else self._pre_solve_sf_check()
         if pre_warnings:
             return {
                 "success": False,
@@ -5713,7 +5720,14 @@ class DWSIMBridgeV2:
                 # ── Safety Validation + SF-05 auto-correction (post-solve) ───
                 safety_warnings = []
                 sf05_corrections = 0
+                # Ablation: the no_safety / direct_llm condition skips the
+                # post-solve SafetyValidator entirely (the raise is caught by
+                # this block's own `except Exception` below, leaving
+                # safety_warnings empty and no SF-05 auto-correction).
                 try:
+                    from ablation_config import ablation as _abl_sv
+                    if _abl_sv.disable_safety:
+                        raise RuntimeError("SafetyValidator disabled (ablation)")
                     from safety_validator import SafetyValidator
                     _topology = {
                         "connections": getattr(self, "_last_topology_connections", []),

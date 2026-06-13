@@ -1,0 +1,44 @@
+{
+  "task_id": "C4-T01",
+  "category": "property_modification",
+  "complexity": 1,
+  "prompt": "Change the methanol inlet temperature to 100°C and re-run the simulation.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "MethanolIn",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 100.0,
+      "tolerance_pct": 1.0,
+      "description": "Methanol inlet set to 100°C"
+    },
+    {
+      "stream_tag": "WaterOut",
+      "property": "temperature_C",
+      "operator": ">",
+      "value": 78.788,
+      "tolerance_pct": 2.0,
+      "description": "Water outlet increases (more heat input)"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "WaterOut T > WaterIn T",
+      "check_type": "T_order",
+      "params": {
+        "hot": "WaterOut",
+        "cold": "WaterIn"
+      }
+    }
+  ],
+  "expected_tools": [
+    "set_stream_property",
+    "run_simulation",
+    "get_simulation_results"
+  ],
+  "human_time_min": 8.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

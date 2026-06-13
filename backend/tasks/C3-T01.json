@@ -1,0 +1,27 @@
+{
+  "task_id": "C3-T01",
+  "category": "flowsheet_analysis",
+  "complexity": 1,
+  "prompt": "Load the heat exchanger flowsheet and report all stream temperatures, pressures, and mass flows.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "any",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 78.788,
+      "tolerance_pct": 1.0,
+      "description": "Agent reports water outlet T ≈ 78.8°C"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "find_flowsheets",
+    "load_flowsheet",
+    "get_simulation_results"
+  ],
+  "human_time_min": 5.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "C5-T02",
+  "category": "parametric_study",
+  "complexity": 2,
+  "prompt": "Run a parametric study varying the water flow rate from 5000 to 30000 kg/h in 5000 kg/h steps. Report how methanol outlet temperature changes.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "correct_direction",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent reports increasing methanol outlet T as water flow decreases"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "parametric_study"
+  ],
+  "human_time_min": 18.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

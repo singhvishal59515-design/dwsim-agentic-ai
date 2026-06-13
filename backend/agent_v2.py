@@ -1359,7 +1359,13 @@ def _build_system_prompt(bridge: DWSIMBridgeV2,
     # is called every iteration — but with user_message="" after iter 1.
     # We therefore inject on ANY call that receives a non-empty user_message,
     # which covers: first turn, AND any turn where query changed substantially.
-    if user_message and len(user_message.strip()) > 10:
+    # Ablation: the no_rag (and direct_llm) condition disables retrieval entirely.
+    try:
+        from ablation_config import ablation as _abl_rag
+        _rag_disabled = _abl_rag.disable_rag
+    except Exception:
+        _rag_disabled = False
+    if not _rag_disabled and user_message and len(user_message.strip()) > 10:
         try:
             if _kb_instance is not None:
                 _kb = _kb_instance
@@ -3510,7 +3516,15 @@ class DWSIMAgentV2:
             # Dynamic tool selection (Review-3 AI Gap 1):
             # Filter the 60+ tool catalog to ~20 tools relevant to current state.
             # Improves LLM tool-selection accuracy (research: degrades >25 tools).
-            active_tools = self._select_active_tools(DWSIM_TOOLS)
+            # Ablation: the direct_llm condition gives the model NO tools, so it
+            # must answer from its own knowledge — the "does the agentic loop
+            # help at all?" baseline.
+            try:
+                from ablation_config import ablation as _abl_tools
+                _no_tools = _abl_tools.disable_tools
+            except Exception:
+                _no_tools = False
+            active_tools = [] if _no_tools else self._select_active_tools(DWSIM_TOOLS)
             response = self._llm_chat_with_retry(
                 messages=self._history,
                 tools=active_tools,

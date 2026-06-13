@@ -73,6 +73,44 @@ def test_bad_rep_is_none(monkeypatch):
     assert ablation.rep is None
 
 
+# ── condition toggles ────────────────────────────────────────────────────────
+
+def test_full_condition_disables_nothing(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("DWSIM_ABLATION_CONDITION", "full")
+    from ablation_config import ablation
+    assert (ablation.disable_rag, ablation.disable_safety,
+            ablation.disable_tools, ablation.direct_llm) == (False, False, False, False)
+
+
+def test_no_rag_only_disables_rag(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("DWSIM_ABLATION_CONDITION", "no_rag")
+    from ablation_config import ablation
+    assert ablation.disable_rag is True
+    assert ablation.disable_safety is False
+    assert ablation.disable_tools is False
+
+
+def test_no_safety_only_disables_safety(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("DWSIM_ABLATION_CONDITION", "no_safety")
+    from ablation_config import ablation
+    assert ablation.disable_safety is True
+    assert ablation.disable_rag is False
+    assert ablation.disable_tools is False
+
+
+def test_direct_llm_disables_everything(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("DWSIM_ABLATION_CONDITION", "direct_llm")
+    from ablation_config import ablation
+    assert ablation.direct_llm is True
+    assert ablation.disable_rag is True
+    assert ablation.disable_safety is True
+    assert ablation.disable_tools is True
+
+
 # ── replay_log tagging ───────────────────────────────────────────────────────
 
 def _build_turn(**kw):

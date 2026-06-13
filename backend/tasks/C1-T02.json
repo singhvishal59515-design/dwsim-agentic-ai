@@ -1,0 +1,57 @@
+{
+  "task_id": "C1-T02",
+  "category": "single_unit_creation",
+  "complexity": 1,
+  "prompt": "Build a pump that raises water pressure from 1 bar to 5 bar. Feed: 25°C, 10 kg/s. Efficiency 75%.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "Product",
+      "property": "pressure_bar",
+      "operator": "~=",
+      "value": 5.0,
+      "tolerance_pct": 2.0,
+      "description": "Outlet pressure ≈ 5 bar"
+    },
+    {
+      "stream_tag": "Product",
+      "property": "mass_flow_kgh",
+      "operator": "~=",
+      "value": 36000.0,
+      "tolerance_pct": 1.0,
+      "description": "Mass balance 36000 kg/h"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Product P > Feed P",
+      "check_type": "T_order",
+      "params": {
+        "hot": "Product",
+        "cold": "Feed",
+        "prop": "pressure_bar"
+      }
+    },
+    {
+      "description": "Vapor fraction = 0 (liquid pump)",
+      "check_type": "VF_range",
+      "params": {
+        "tag": "Product",
+        "min": 0.0,
+        "max": 0.01
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 12.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}
