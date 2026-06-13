@@ -151,6 +151,41 @@ def _patched_health(monkeypatch, fake_bridge):
     return api.health()
 
 
+def test_bug3_pp_name_falls_back_to_tag_when_name_is_null():
+    # DWSIM 9.0.5: pp.Name is .NET null -> Python None -> str()=="None".
+    # The real name is in .Tag / .DisplayName. _pp_display_name must skip the
+    # null Name and never return the literal string "None".
+    from dwsim_bridge_v2 import DWSIMBridgeV2
+    pp = types.SimpleNamespace(Name=None, Tag="Peng-Robinson (PR)",
+                               DisplayName="Peng-Robinson")
+    assert DWSIMBridgeV2._pp_display_name(pp) == "Peng-Robinson (PR)"
+
+
+def test_bug3_pp_name_returns_none_when_all_nullish():
+    from dwsim_bridge_v2 import DWSIMBridgeV2
+    pp = types.SimpleNamespace(Name=None, Tag="None", DisplayName="")
+    assert DWSIMBridgeV2._pp_display_name(pp) is None
+
+
+def test_bug3_read_property_package_from_collection():
+    # Reproduces the DWSIM Dictionary[String,IPropertyPackage] shape with a
+    # .Keys accessor and a null-Name package.
+    from dwsim_bridge_v2 import DWSIMBridgeV2
+
+    class _Coll:
+        def __init__(self, d): self._d = d
+        @property
+        def Keys(self): return list(self._d.keys())
+        def __getitem__(self, k): return self._d[k]
+
+    pp = types.SimpleNamespace(Name=None, Tag="Peng-Robinson (PR)",
+                               DisplayName="Peng-Robinson")
+    fs = types.SimpleNamespace(PropertyPackages=_Coll({"PP-1": pp}))
+    fake = types.SimpleNamespace(_pp_display_name=DWSIMBridgeV2._pp_display_name)
+    out = DWSIMBridgeV2._read_property_package(fake, fs)
+    assert out == "Peng-Robinson (PR)"
+
+
 def test_bug3_health_uses_live_property_package(monkeypatch):
     fake = types.SimpleNamespace(
         current_property_package=None,

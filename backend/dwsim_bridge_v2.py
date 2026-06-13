@@ -2821,47 +2821,66 @@ class DWSIMBridgeV2:
         return {"success": True, "compounds": compounds,
                 "count": len(compounds)}
 
+    @staticmethod
+    def _pp_display_name(pp) -> Optional[str]:
+        """Extract a human name from a DWSIM property-package object.
+
+        On DWSIM 9.0.5 `pp.Name` is .NET null (pythonnet -> Python None ->
+        str() == 'None', the source of the bogus property_package:'None').
+        The real name lives in `.Tag` ('Peng-Robinson (PR)') or `.DisplayName`
+        ('Peng-Robinson'). Try the good attributes first and reject null-ish
+        values so we never return the literal string 'None'.
+        """
+        for attr in ("Tag", "DisplayName", "Name"):
+            try:
+                val = getattr(pp, attr, None)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            s = str(val).strip()
+            if s and s.lower() not in ("none", "null"):
+                return s
+        return None
+
     def _read_property_package(self, fs) -> str:
         """Try various DWSIM API paths to read the property package name."""
-        # Path 1: fs.SelectedPropertyPackage
+        # Path 1: a single selected package directly on the flowsheet.
         for attr in ("SelectedPropertyPackage", "PropertyPackage",
                      "ThermodynamicsPackage"):
             try:
-                val = getattr(fs, attr)
+                val = getattr(fs, attr, None)
                 if val is not None:
-                    name = str(val)
-                    # It might be an object with a .Name property
-                    try: name = str(val.Name)
-                    except Exception: pass
-                    if name and name not in ("None", ""):
+                    name = self._pp_display_name(val)
+                    if name:
                         return name
             except Exception:
                 pass
 
-        # Path 2: iterate property packages collection
+        # Path 2: iterate the property-packages collection (the real path on
+        # DWSIM 9.0.5 — fs.PropertyPackages is Dictionary[String, IPropertyPackage]).
         for coll_attr in ("PropertyPackages", "ThermodynamicsPackages"):
             try:
-                coll = getattr(fs, coll_attr)
+                coll = getattr(fs, coll_attr, None)
                 if coll is None:
                     continue
+                names = []
                 try:
-                    names = []
                     for k in coll.Keys:
-                        pp = coll[k]
-                        try: names.append(str(pp.Name))
-                        except Exception: names.append(str(k))
-                    if names:
-                        return ", ".join(names)
+                        nm = self._pp_display_name(coll[k])
+                        if nm:
+                            names.append(nm)
                 except Exception:
-                    pass
-                # Try as list
-                try:
-                    items = list(coll)
-                    if items:
-                        try: return str(items[0].Name)
-                        except Exception: return str(items[0])
-                except Exception:
-                    pass
+                    try:
+                        for pp in list(coll):
+                            nm = self._pp_display_name(pp)
+                            if nm:
+                                names.append(nm)
+                    except Exception:
+                        pass
+                if names:
+                    # de-dupe, preserve order
+                    return ", ".join(dict.fromkeys(names))
             except Exception:
                 pass
 
