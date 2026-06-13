@@ -1962,27 +1962,36 @@ DWSIM_TOOLS = [
     {
         "name": "thermo_method_assistant",
         "description": (
-            "Thermodynamic property-method assistant (like Aspen's Methods "
-            "Assistant), grounded in the 28 packages DWSIM actually installs and "
-            "mapped to Aspen Plus method names. Three actions: "
-            "'catalogue' = full list of packages with family, Aspen equivalents, "
-            "what each is best/worst for, plus the honest Aspen-vs-DWSIM gaps "
-            "(e.g. true electrolyte ENRTL-RK, polymer methods); "
-            "'recommend' = pick a DWSIM-INSTANTIABLE package from system flags "
-            "(electrolyte, acid_gas_amine, polar, hydrocarbon, water_only, "
-            "natural_gas, refinery_heavy, have_binary_data, pressure_bar); "
-            "'resolve' = map a requested/Aspen model name (e.g. 'PENG-ROB', "
-            "'ELECNRTL', 'eNRTL') to the real DWSIM package name. Always returns "
-            "names the engine can use, so the agent never picks an unavailable "
-            "package."
+            "Thermodynamic Intelligence — property-method assistant (like Aspen's "
+            "Methods Assistant), grounded in the 28 packages DWSIM actually "
+            "installs and mapped to Aspen Plus method names. Actions: "
+            "'intelligence' = ONE call from a compound list: auto-selects the "
+            "theory-appropriate DWSIM package, lists the credible alternative "
+            "packages to compare for model-form uncertainty, and gives a "
+            "defensible fidelity statement (directly answers 'how do you know "
+            "your thermo is right?'); "
+            "'candidates' = ranked credible packages for this system (feed to "
+            "multi_model_uncertainty); "
+            "'recommend' = pick a DWSIM-INSTANTIABLE package from explicit flags; "
+            "'resolve' = map a requested/Aspen name (e.g. 'PENG-ROB', 'ELECNRTL') "
+            "to the real DWSIM package; "
+            "'classify' = system flags for a compound list; "
+            "'catalogue' = full mapped list + honest Aspen-vs-DWSIM gaps. Always "
+            "returns names the engine can use."
         ),
         "parameters": {
             "type": "object",
             "required": [],
             "properties": {
                 "action":  {"type": "string",
-                            "enum": ["catalogue", "recommend", "resolve"],
-                            "description": "Default 'catalogue'."},
+                            "enum": ["intelligence", "candidates", "recommend",
+                                     "resolve", "classify", "catalogue"],
+                            "description": "Default 'catalogue'. Prefer "
+                                           "'intelligence' for a full answer."},
+                "compounds": {"type": "array", "items": {"type": "string"},
+                              "description": "Compound list for intelligence / "
+                                             "candidates / classify."},
+                "temperature_C": {"type": "number"},
                 "model":   {"type": "string",
                             "description": "For action='resolve': the requested/"
                                            "Aspen model name to map to DWSIM."},

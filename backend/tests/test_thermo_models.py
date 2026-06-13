@@ -81,6 +81,58 @@ def test_assistant_actions():
     assert res["dwsim_name"] in tm.DWSIM_PACKAGES_SET
 
 
+def test_classify_flags():
+    import thermo_models as tm
+    assert tm.classify(["Water"])["water_only"] is True
+    assert tm.classify(["NaOH", "Water"])["electrolyte"] is True
+    assert tm.classify(["Methane"], pressure_bar=60)["natural_gas"] is True
+    assert tm.classify(["Methanol", "Water"])["polar"] is True
+    assert tm.classify(["Benzene", "Toluene"])["hydrocarbon"] is True
+
+
+def test_candidate_packages_are_all_real_and_system_specific():
+    import thermo_models as tm
+    # every candidate, for every system type, must be a real DWSIM package
+    for comps, P, T in [(["Water"], 1.0, 25), (["Methane"], 60, -60),
+                        (["Methanol", "Water"], 1.0, 25),
+                        (["Benzene", "Toluene"], 1.0, 25),
+                        (["Acetone", "Water"], 20, 25),
+                        (["Oxygen", "Argon"], 1.0, 25)]:
+        cand = tm.candidate_packages(comps, P, T)
+        assert cand["candidates"], (comps, cand)
+        for p in cand["candidates"]:
+            assert tm.is_available(p), (comps, p)
+    # water → reference steam tables among candidates; natural gas → GERG
+    assert "Steam Tables (IAPWS-IF97)" in tm.candidate_packages(["Water"], 1, 25)["candidates"]
+    assert "GERG-2008" in tm.candidate_packages(["Methane"], 60, -60)["candidates"]
+
+
+def test_electrolyte_uncertainty_is_not_comparable():
+    # Honest: DWSIM has only one electrolyte model → no model-form spread.
+    import thermo_models as tm
+    cand = tm.candidate_packages(["NaOH", "Water", "HCl"])
+    assert cand["comparable"] is False
+    assert len(cand["candidates"]) == 1
+
+
+def test_thermodynamic_intelligence_unifies_selection_and_uncertainty():
+    import thermo_models as tm
+    ti = tm.thermodynamic_intelligence(["Methanol", "Water"], pressure_bar=1.0)
+    assert tm.is_available(ti["recommended_pp"])
+    assert ti["uncertainty_candidates"]
+    assert all(tm.is_available(p) for p in ti["uncertainty_candidates"])
+    assert "multi_model_uncertainty" in ti["fidelity_statement"]
+    # electrolyte → fidelity statement states the gap, no false comparison
+    ti_e = tm.thermodynamic_intelligence(["NaOH", "Water"])
+    assert "cannot be formed" in ti_e["fidelity_statement"]
+
+
+def test_assistant_intelligence_action():
+    import thermo_models as tm
+    r = tm.assistant("intelligence", compounds=["Water"])
+    assert r["success"] and r["recommended_pp"] == "Steam Tables (IAPWS-IF97)"
+
+
 def test_selector_now_returns_dwsim_valid_package():
     # The classic failure: an electrolyte system used to recommend
     # "Electrolyte NRTL (eNRTL)", which DWSIM cannot instantiate.

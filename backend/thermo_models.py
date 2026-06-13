@@ -417,7 +417,130 @@ def assistant(action: str = "catalogue", model: Optional[str] = None,
     if action == "recommend":
         kw = {k: flags[k] for k in _RECOMMEND_FLAGS if k in flags}
         return {"success": True, "recommendation": recommend(**kw)}
+    if action in ("intelligence", "candidates", "classify"):
+        comps = flags.get("compounds") or ([] if model is None else [model])
+        P = float(flags.get("pressure_bar", 1.01325))
+        T = float(flags.get("temperature_C", 25.0))
+        hbd = bool(flags.get("have_binary_data", False))
+        if action == "classify":
+            return {"success": True, "classification": classify(comps, P, T)}
+        if action == "candidates":
+            return {"success": True, **candidate_packages(comps, P, T,
+                                                           have_binary_data=hbd)}
+        return thermodynamic_intelligence(comps, P, T, have_binary_data=hbd)
     return {"success": True, **catalogue()}
+
+
+def classify(compounds: List[str], pressure_bar: float = 1.01325,
+             temperature_C: float = 25.0) -> Dict[str, Any]:
+    """Classify a compound set into the flags that drive package selection —
+    the SINGLE source of truth shared by selection and uncertainty so they
+    never disagree on what kind of system this is."""
+    cl = [str(c).lower() for c in (compounds or [])]
+    polar = any(c in cl for c in
+                ["water", "methanol", "ethanol", "acetone", "acetic acid",
+                 "ammonia", "mea", "dea", "mdea", "glycol", "ethylene glycol"])
+    electrolyte = any(c in cl for c in
+                      ["naoh", "hcl", "h2so4", "nacl", "kcl", "nahco3",
+                       "na2co3", "caco3", "koh"])
+    acid_gas = any(c in cl for c in ["co2", "h2s", "so2"])
+    light_hc = any(c in cl for c in
+                   ["methane", "ethane", "propane", "butane", "n-butane",
+                    "iso-butane", "ch4", "c2h6", "c3h8", "nitrogen", "n2"])
+    heavy_hc = any(c in cl for c in
+                   ["hexane", "heptane", "octane", "nonane", "decane",
+                    "benzene", "toluene", "xylene"])
+    hc = light_hc or heavy_hc
+    water_only = len(cl) == 1 and any(w in cl for w in ["water", "steam"])
+    high_press = pressure_bar > 30
+    cryogenic = temperature_C < -50
+    natural_gas = light_hc and (high_press or cryogenic)
+    return {"polar": polar, "electrolyte": electrolyte, "acid_gas": acid_gas,
+            "hydrocarbon": hc, "light_hc": light_hc, "heavy_hc": heavy_hc,
+            "water_only": water_only, "high_pressure": high_press,
+            "cryogenic": cryogenic, "natural_gas": natural_gas,
+            "pressure_bar": pressure_bar, "temperature_C": temperature_C}
+
+
+def candidate_packages(compounds: List[str], pressure_bar: float = 1.01325,
+                       temperature_C: float = 25.0, n: int = 3,
+                       have_binary_data: bool = False) -> Dict[str, Any]:
+    """Ranked list of CREDIBLE DWSIM packages for THIS system — the
+    theory-appropriate alternatives to compare in a model-form uncertainty
+    study (so uncertainty is measured across models that could each plausibly
+    be right, not a blind fixed trio). Every returned name is a real DWSIM key."""
+    f = classify(compounds, pressure_bar, temperature_C)
+    if f["water_only"]:
+        ranked = ["Steam Tables (IAPWS-IF97)", "CoolProp", "Peng-Robinson (PR)"]
+        rationale = "Pure water — reference steam tables vs cubic EOS."
+    elif f["electrolyte"]:
+        ranked = ["Ideal Solution (Aqueous Electrolytes)"]
+        rationale = ("Electrolyte system — DWSIM has only an ideal electrolyte "
+                     "model, so a model-form spread cannot be formed (a genuine "
+                     "fidelity gap; see ASPEN_GAPS / ENRTL-RK).")
+    elif f["natural_gas"]:
+        ranked = ["GERG-2008", "Peng-Robinson (PR)",
+                  "Soave-Redlich-Kwong (SRK)", "Lee-Kesler-Plöcker"]
+        rationale = "Natural gas — reference GERG-2008 vs cubic EOS."
+    elif f["polar"] and not f["hydrocarbon"] and pressure_bar < 10:
+        ranked = (["NRTL", "UNIQUAC", "Wilson"] if have_binary_data
+                  else ["Modified UNIFAC (Dortmund)", "UNIFAC", "NRTL"])
+        rationale = ("Polar low-pressure — activity-coefficient models "
+                     + ("(fitted)" if have_binary_data else "(predictive UNIFAC)") + ".")
+    elif f["polar"] and pressure_bar >= 10:
+        ranked = ["Peng-Robinson 1978 (PR78) Advanced",
+                  "Peng-Robinson-Stryjek-Vera 2 (PRSV2-M)",
+                  "Soave-Redlich-Kwong (SRK) Advanced"]
+        rationale = "Polar high-pressure — advanced-mixing-rule cubic EOS."
+    elif f["polar"] and f["hydrocarbon"]:
+        ranked = ["Modified UNIFAC (Dortmund)", "NRTL",
+                  "Peng-Robinson 1978 (PR78) Advanced"]
+        rationale = "Mixed polar/hydrocarbon — activity model vs advanced cubic."
+    elif f["hydrocarbon"]:
+        ranked = ["Peng-Robinson (PR)", "Soave-Redlich-Kwong (SRK)",
+                  "Peng-Robinson 1978 (PR78)", "Lee-Kesler-Plöcker"]
+        rationale = "Hydrocarbons — the standard cubic EOS family."
+    else:
+        ranked = ["Peng-Robinson (PR)", "Soave-Redlich-Kwong (SRK)",
+                  "PC-SAFT (with Association Support) (.NET Code)"]
+        rationale = "General — cubic EOS vs SAFT."
+    # Guarantee validity and trim.
+    ranked = [p for p in dict.fromkeys(ranked) if is_available(p)][:max(1, n)]
+    return {"candidates": ranked, "rationale": rationale, "flags": f,
+            "comparable": len(ranked) >= 2}
+
+
+def thermodynamic_intelligence(compounds: List[str], pressure_bar: float = 1.01325,
+                               temperature_C: float = 25.0,
+                               have_binary_data: bool = False) -> Dict[str, Any]:
+    """Unified 'Thermodynamic Intelligence' answer that directly addresses the
+    model-fidelity criticism: (1) auto-select the theory-appropriate, DWSIM-
+    instantiable package, (2) list the credible alternatives to compare for
+    model-form uncertainty, and (3) state how to defend the choice."""
+    f = classify(compounds, pressure_bar, temperature_C)
+    rec = recommend(electrolyte=f["electrolyte"],
+                    acid_gas_amine=f["acid_gas"] and f["polar"],
+                    polar=f["polar"], hydrocarbon=f["hydrocarbon"],
+                    water_only=f["water_only"], natural_gas=f["natural_gas"],
+                    refinery_heavy=f["heavy_hc"] and not f["polar"],
+                    have_binary_data=have_binary_data,
+                    pressure_bar=pressure_bar)
+    cand = candidate_packages(compounds, pressure_bar, temperature_C,
+                              have_binary_data=have_binary_data)
+    if cand["comparable"]:
+        fidelity = (f"Defensible: use {rec['recommended_pp']}, and quantify "
+                    f"model-form uncertainty across {cand['candidates']} via "
+                    f"multi_model_uncertainty — report the spread, not a single "
+                    f"unvalidated number.")
+    else:
+        fidelity = (f"Use {rec['recommended_pp']}. Note: a model-form spread "
+                    f"cannot be formed here ({cand['rationale']}) — state this "
+                    f"limitation explicitly rather than implying validated fidelity.")
+    return {"success": True, "recommended_pp": rec["recommended_pp"],
+            "ideal_aspen_method": rec["aspen_equivalent"],
+            "uncertainty_candidates": cand["candidates"],
+            "classification": f, "caveat": rec["caveat"],
+            "fidelity_statement": fidelity}
 
 
 def catalogue() -> Dict[str, Any]:

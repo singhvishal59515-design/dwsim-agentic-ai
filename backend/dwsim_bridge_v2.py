@@ -5966,7 +5966,34 @@ class DWSIMBridgeV2:
                              "same shape as build_flowsheet_atomic. Build the "
                              "flowsheet from a spec first, then pass that spec."}
 
+        # Smart default: compare the THEORY-APPROPRIATE candidate packages for
+        # THIS system (e.g. Steam/CoolProp/PR for water; GERG/PR/SRK for natural
+        # gas; activity models for polar low-P), not a blind PR/SRK/NRTL trio.
+        # This is what makes the uncertainty "intelligent": the spread is over
+        # models that could each plausibly be correct for the chemistry.
         default_pkgs = ["Peng-Robinson (PR)", "Soave-Redlich-Kwong (SRK)", "NRTL"]
+        if not property_packages:
+            try:
+                from thermo_models import candidate_packages
+                # Use a representative feed P/T if available in the spec.
+                _P, _T = 1.01325, 25.0
+                for fs in (spec.get("feed_specs") or []):
+                    if fs.get("pressure") is not None:
+                        _u = (fs.get("pressure_unit") or "bar").lower()
+                        _v = float(fs["pressure"])
+                        _P = (_v if "bar" in _u else _v/1e5 if _u == "pa"
+                              else _v*1.01325 if _u == "atm" else _v)
+                    if fs.get("temperature") is not None:
+                        _tu = (fs.get("temperature_unit") or "C").lower()
+                        _tv = float(fs["temperature"])
+                        _T = (_tv if _tu.startswith("c") else _tv-273.15
+                              if _tu.startswith("k") else _tv)
+                    break
+                cand = candidate_packages(spec.get("compounds") or [], _P, _T)
+                if cand.get("candidates"):
+                    default_pkgs = cand["candidates"]
+            except Exception:
+                pass
         pkgs = list(property_packages or default_pkgs)
         try:
             avail = [str(p.Key) for p in self._mgr.AvailablePropertyPackages]
