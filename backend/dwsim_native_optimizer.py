@@ -137,7 +137,12 @@ def _write_object_property(bridge, tag: str, property_name: str,
     changed. Strict-first makes routing correct for both object types.
     """
     try:
-        r = bridge.set_unit_op_property(tag, property_name, float(value))
+        # Pass the unit through. Dropping it silently wrote non-SI values as SI
+        # (e.g. an outlet_pressure decision variable of 3 "bar" was written as
+        # 3 Pa, so the unit did almost no compression and the objective barely
+        # moved → the optimizer drifted to a bound). Temperature survived only by
+        # a magnitude heuristic in set_unit_op_property; pressure/flow did not.
+        r = bridge.set_unit_op_property(tag, property_name, float(value), unit)
         if isinstance(r, dict) and r.get("success"):
             return True
     except Exception:
