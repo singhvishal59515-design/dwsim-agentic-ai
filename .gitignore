@@ -89,3 +89,7 @@ backend/*.bak
 
 # Replay log (session data — may contain user queries)
 backend/replay_turns/
+
+# Ablation run artifacts
+ablation_logs/
+backend/ablation_logs/

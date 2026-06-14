@@ -101,8 +101,13 @@ simulator,"** not "Aspen-level simulation." See `ASPEN_CAPABILITY_MATRIX.md`.
 
 **Gated on LLM throughput (not code):**
 1. A clean 25-task benchmark headline (≈9 tasks unrun due to rate-limiting).
-2. The ablation *results* — the harness, toggles, frozen tasks, and stats are
-   built and tested; running 4 conditions × 25 tasks × ≥3 reps needs quota.
+2. The ablation *results* — the pipeline is now **fully wired and runnable**
+   (`ablation_runner.py` drives the real agent over the frozen tasks under the
+   A/B/C/D toggles → `ablation_logs/*.jsonl` → `ablation_report.py` /
+   `ablation_stats.py`), verified end-to-end without quota by a mock round-trip
+   (`tests/test_ablation_runner.py`). Running 4 conditions × 25 tasks × ≥3 reps
+   is one command (`python ablation_runner.py --reps 3`) and needs only LLM
+   throughput, not more code.
 
 **Engineering follow-ups (honest, not hidden):**
 - Infeasible-path live coupling (optimizer mechanics confirmed; a coupling-correct

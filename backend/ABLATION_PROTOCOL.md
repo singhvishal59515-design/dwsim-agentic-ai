@@ -61,21 +61,37 @@ success (binary), tool-call count (`len(tool_sequence)`), wall time
 (tool_calls where `success == False` followed by a later success),
 safety violations caught (`sf_violations`).
 
-## What Phase 3 does NOT yet include (Phase 4)
+## Running the study (now fully wired)
 
-- The **condition toggles** themselves — disabling RAG (`no_rag`), the
-  SafetyValidator (`no_safety`), and tools entirely (`direct_llm`). Phase 3
-  only *tags* the condition; wiring each toggle off is Phase-4 harness work.
-- The 4-condition runner and the statistics (Kruskal-Wallis, pairwise
-  Mann-Whitney U with Holm correction, Cohen's d).
-
-## Running one condition (illustrative)
+The runner drives the **real agent** over the frozen 25 tasks under each
+condition, applying the toggles via `ablation_config`, scoring each task with the
+benchmark success criteria (`benchmark_tasks.run_task`), and writing one JSONL
+record per task to `ablation_logs/`.
 
 ```powershell
-$env:DWSIM_ABLATION_CONDITION = "full"
-$env:DWSIM_ABLATION_TASK      = "C1-T01"
-$env:DWSIM_ABLATION_REP       = "1"
-# … invoke the agent on task C1-T01 …
+# Mechanics smoke test (no real study) — proves the pipeline end to end:
+python ablation_runner.py --smoke
+
+# Full study (needs LLM throughput): 4 conditions × 25 tasks × 3 reps
+python ablation_runner.py --reps 3
+#   A = Full System   B = No-RAG   C = No-SafetyValidator   D = Direct LLM
+
+# Analyse:
+python ablation_report.py     # tables, Kruskal-Wallis, Mann-Whitney+Holm, Cohen's d, CSV
+python ablation_stats.py --records <(...)   # programmatic stats object (tests/paper)
 ```
 
-Then group `replay_log.jsonl` by `(condition, task_id, rep)` for analysis.
+Per-task JSONL record (`ablation_logs/cond_<X>_rep<n>.jsonl`):
+`{condition, task_id, category, complexity, rep, success(1/0/-1), tool_calls,
+wall_time_s, error_recovery_events, outcome}`. `success = -1` marks a
+not-applicable task (e.g. a missing fixture); the analysis excludes it so it
+never depresses a condition's score.
+
+The pipeline is verified without quota by `tests/test_ablation_runner.py`
+(a mock agent → runner → logs → report loader round-trip, including the
+error-recovery count and the condition→toggle mapping). A real run therefore
+needs only LLM throughput, not more code.
+
+### Condition → toggle mapping
+`A→full`, `B→no_rag`, `C→no_safety`, `D→direct_llm` (set automatically by the
+runner via `DWSIM_ABLATION_CONDITION`; each implies determinism + provider lock).
