@@ -72,7 +72,7 @@ def test_optimizer_minimizes_tac_to_interior_optimum():
             v = self.p.get((t, pr)); return {"success": v is not None, "value": v}
         def get_stream_properties(self, t):
             return {"success": True, "properties": {k[1]: v for k, v in self.p.items() if k[0] == t}}
-        def set_unit_op_property(self, t, pr, v): self.p[(t, pr)] = float(v); return {"success": True}
+        def set_unit_op_property(self, t, pr, v, unit=""): self.p[(t, pr)] = float(v); return {"success": True}
         def set_stream_property(self, t, pr, v, u=""): return {"success": False}
         def run_simulation(self): return {"success": True}
         def save_and_solve(self): return {"success": True}

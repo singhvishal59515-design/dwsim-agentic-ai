@@ -1962,22 +1962,14 @@ DWSIM_TOOLS = [
     {
         "name": "thermo_method_assistant",
         "description": (
-            "Thermodynamic Intelligence — property-method assistant (like Aspen's "
-            "Methods Assistant), grounded in the 28 packages DWSIM actually "
-            "installs and mapped to Aspen Plus method names. Actions: "
-            "'intelligence' = ONE call from a compound list: auto-selects the "
-            "theory-appropriate DWSIM package, lists the credible alternative "
-            "packages to compare for model-form uncertainty, and gives a "
-            "defensible fidelity statement (directly answers 'how do you know "
-            "your thermo is right?'); "
-            "'candidates' = ranked credible packages for this system (feed to "
-            "multi_model_uncertainty); "
-            "'recommend' = pick a DWSIM-INSTANTIABLE package from explicit flags; "
-            "'resolve' = map a requested/Aspen name (e.g. 'PENG-ROB', 'ELECNRTL') "
-            "to the real DWSIM package; "
-            "'classify' = system flags for a compound list; "
-            "'catalogue' = full mapped list + honest Aspen-vs-DWSIM gaps. Always "
-            "returns names the engine can use."
+            "Thermodynamic Intelligence (Aspen Methods-Assistant equivalent), "
+            "grounded in DWSIM's 28 installed packages mapped to Aspen names. "
+            "Actions: 'intelligence' (from a compound list → auto-select package "
+            "+ credible alternatives + defensible fidelity statement), "
+            "'candidates' (ranked packages to feed multi_model_uncertainty), "
+            "'recommend' (pick from flags), 'resolve' (Aspen name e.g. ELECNRTL → "
+            "DWSIM package), 'classify', 'catalogue' (full list + Aspen gaps). "
+            "Always returns engine-usable names."
         ),
         "parameters": {
             "type": "object",
