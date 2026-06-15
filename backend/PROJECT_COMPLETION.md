@@ -38,11 +38,11 @@ benchmark headline and the ablation), which is gated on LLM throughput, not code
 ## 3. Evidence ladder (increasing realism, decreasing coverage)
 
 ### 3.1 Component correctness
-`pytest -q` (runtime interpreter): **545 passed, 5 skipped** (the skips require a
+`pytest -q` (runtime interpreter): **558 passed, 5 skipped** (the skips require a
 live DWSIM and self-skip). Covers tool selection/sequencing, optimizer
 convergence on analytic objectives, the recycle/energy passes, failover, history
-normalisation, the bridge-bug regressions, the ablation config, and the
-thermo registry.
+normalisation, the bridge-bug regressions (incl. BUG-4 get_stream timeout), the
+ablation config + runner round-trip, and the thermo-intelligence registry.
 
 ### 3.2 Optimizer validation against known answers (analytic, exact)
 - Single-objective global search: **5/5** standard functions solved.
@@ -132,7 +132,7 @@ simulator,"** not "Aspen-level simulation." See `ASPEN_CAPABILITY_MATRIX.md`.
 
 ## 8. Bottom line
 
-The system is **designed, implemented, component-validated (545 tests), and
+The system is **designed, implemented, component-validated (558 tests), and
 demonstrated end-to-end on a live DWSIM engine**, with **optimization methodology
 at commercial level validated against known optima** — including an interior
 optimum with a closed-form answer matched live to within real-gas tolerance. The
