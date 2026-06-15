@@ -1,0 +1,26 @@
+{
+  "task_id": "C8-T03",
+  "category": "convergence_repair",
+  "complexity": 3,
+  "prompt": "The recycle loop simulation is not converging. Apply convergence repair strategies and report which strategy worked.",
+  "property_package": "any",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "reports_strategy",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent reports which auto-corrector strategy succeeded"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "run_simulation",
+    "check_convergence"
+  ],
+  "human_time_min": 25.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

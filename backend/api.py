@@ -358,8 +358,20 @@ def health():
                   or getattr(b, "_active_alias", None)
                   or getattr(getattr(b, "state", None), "name", None))
             st = getattr(b, "state", None)
-            pp = (getattr(b, "current_property_package", None)
-                  or getattr(st, "property_package", None))
+            # Read the property package LIVE from the flowsheet. The cached
+            # `current_property_package`/state attribute is never populated on
+            # load, so /health always reported property_package:"None" even with
+            # a package set (reproduced on simple_heater). Fall back to the cache
+            # only if the live read yields nothing usable.
+            pp = None
+            try:
+                if hasattr(b, "get_property_package"):
+                    pp = (b.get_property_package() or {}).get("property_package")
+            except Exception:
+                pp = None
+            if not pp or pp in ("None", "Unknown"):
+                pp = (getattr(b, "current_property_package", None)
+                      or getattr(st, "property_package", None) or pp)
     except Exception: pass
     tool_count = None
     try:
@@ -1029,6 +1041,10 @@ def stream_props(req: StreamPropertyRequest):
     try:
         with _bridge_lock:
             b = _get_bridge()
+            # BUG-4: use the timeout+retry wrapper so a rare blocked read returns
+            # an actionable error instead of hanging the MCP transport.
+            if hasattr(b, "get_stream_properties_safe"):
+                return b.get_stream_properties_safe(req.tag)
             return b.get_stream_properties(req.tag) if hasattr(b,"get_stream_properties") else {"success": False}
     except Exception as exc: return {"success": False, "error": str(exc)}
 
@@ -2507,10 +2523,26 @@ def compound_props(name: str):
 
 @app.get("/property-packages")
 def prop_packages():
+    # The grounded registry (Aspen-mapped, with applicability) is the catalogue;
+    # cross-check against what the live engine actually installs so the UI never
+    # offers a package the engine lacks. (Previously imported a non-existent
+    # property_db.list_packages and always errored.)
     try:
-        from property_db import list_packages
-        return {"packages": list_packages()}
-    except Exception as exc: return {"packages": [], "error": str(exc)}
+        from thermo_models import catalogue, DWSIM_PACKAGES
+        cat = catalogue()
+        installed = list(DWSIM_PACKAGES)
+        try:
+            b = _bridge
+            if b is not None and getattr(b, "_mgr", None) is not None:
+                live = [str(p.Key) for p in b._mgr.AvailablePropertyPackages]
+                if live:
+                    installed = live
+        except Exception:
+            pass
+        return {"packages": installed, "n_packages": len(installed),
+                "catalogue": cat["packages"], "aspen_gaps": cat["aspen_gaps"]}
+    except Exception as exc:
+        return {"packages": [], "error": str(exc)}
 
 # ── Process library + Literature ────────────────────────────────────────────
 @app.get("/process-library")

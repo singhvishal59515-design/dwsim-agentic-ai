@@ -1,0 +1,35 @@
+{
+  "task_id": "C8-T04",
+  "category": "convergence_repair",
+  "complexity": 3,
+  "prompt": "Create a two-recycle reactor system. First attempt may not converge — apply iterative strategies until convergence is achieved.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "achieves_convergence",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "System eventually converges"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Mass balance closure",
+      "check_type": "mass_balance",
+      "params": {}
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "save_and_solve",
+    "run_simulation"
+  ],
+  "human_time_min": 45.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

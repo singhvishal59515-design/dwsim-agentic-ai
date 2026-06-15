@@ -1,0 +1,66 @@
+{
+  "task_id": "C1-T01",
+  "category": "single_unit_creation",
+  "complexity": 1,
+  "prompt": "Create a water heating process from 25°C to 80°C at 1 atm, 1 kg/s, using Steam Tables.",
+  "property_package": "Steam Tables (IAPWS-IF97)",
+  "success_criteria": [
+    {
+      "stream_tag": "Product",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 80.0,
+      "tolerance_pct": 1.5,
+      "description": "Product temperature within 1.5% of 80°C"
+    },
+    {
+      "stream_tag": "Product",
+      "property": "pressure_bar",
+      "operator": "~=",
+      "value": 1.013,
+      "tolerance_pct": 2.0,
+      "description": "Product pressure ≈ 1.013 bar"
+    },
+    {
+      "stream_tag": "Product",
+      "property": "mass_flow_kgh",
+      "operator": "~=",
+      "value": 3600.0,
+      "tolerance_pct": 1.0,
+      "description": "Mass balance: 3600 kg/h"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Product T > Feed T",
+      "check_type": "T_order",
+      "params": {
+        "hot": "Product",
+        "cold": "Feed"
+      }
+    },
+    {
+      "description": "All pressures > 0",
+      "check_type": "P_positive",
+      "params": {}
+    },
+    {
+      "description": "T > 0 K",
+      "check_type": "T_positive",
+      "params": {}
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 15.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

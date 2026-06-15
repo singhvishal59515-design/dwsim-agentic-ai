@@ -1359,7 +1359,13 @@ def _build_system_prompt(bridge: DWSIMBridgeV2,
     # is called every iteration — but with user_message="" after iter 1.
     # We therefore inject on ANY call that receives a non-empty user_message,
     # which covers: first turn, AND any turn where query changed substantially.
-    if user_message and len(user_message.strip()) > 10:
+    # Ablation: the no_rag (and direct_llm) condition disables retrieval entirely.
+    try:
+        from ablation_config import ablation as _abl_rag
+        _rag_disabled = _abl_rag.disable_rag
+    except Exception:
+        _rag_disabled = False
+    if not _rag_disabled and user_message and len(user_message.strip()) > 10:
         try:
             if _kb_instance is not None:
                 _kb = _kb_instance
@@ -1606,6 +1612,13 @@ class DWSIMAgentV2:
             "save_and_solve":         lambda: self.bridge.save_and_solve(),
             "build_flowsheet_atomic": lambda **spec:
                                           self.bridge.build_flowsheet_atomic(spec),
+            "multi_model_uncertainty": lambda spec, property_packages=None,
+                                              observe_props=None:
+                                          self.bridge.multi_model_uncertainty(
+                                              spec, property_packages, observe_props),
+            "thermo_method_assistant": lambda action="catalogue", model=None, **kw:
+                                          __import__("thermo_models").assistant(
+                                              action, model, **kw),
             "list_flowsheet_templates": self._list_flowsheet_templates,
             "create_from_template":   self._create_from_template,
             "generate_report":        lambda **kwargs:
@@ -3318,6 +3331,7 @@ class DWSIMAgentV2:
         # ── Reproducibility replay builder ────────────────────────────────────
         try:
             import replay_log as _rl
+            from ablation_config import ablation as _abl
             self._replay_builder = _rl.TurnBuilder(
                 session_id  = self._session_id,
                 turn_index  = self._turn_index,
@@ -3325,6 +3339,7 @@ class DWSIMAgentV2:
                 model       = getattr(self.llm, "model", ""),
                 temperature = getattr(self.llm, "temperature", 0.0),
                 seed        = getattr(self.llm, "_REPRODUCIBILITY_SEED", 42),
+                **_abl.tags(),   # condition / task_id / rep for ablation grouping
             )
         except Exception:
             self._replay_builder = None
@@ -3508,7 +3523,15 @@ class DWSIMAgentV2:
             # Dynamic tool selection (Review-3 AI Gap 1):
             # Filter the 60+ tool catalog to ~20 tools relevant to current state.
             # Improves LLM tool-selection accuracy (research: degrades >25 tools).
-            active_tools = self._select_active_tools(DWSIM_TOOLS)
+            # Ablation: the direct_llm condition gives the model NO tools, so it
+            # must answer from its own knowledge — the "does the agentic loop
+            # help at all?" baseline.
+            try:
+                from ablation_config import ablation as _abl_tools
+                _no_tools = _abl_tools.disable_tools
+            except Exception:
+                _no_tools = False
+            active_tools = [] if _no_tools else self._select_active_tools(DWSIM_TOOLS)
             response = self._llm_chat_with_retry(
                 messages=self._history,
                 tools=active_tools,
@@ -4056,6 +4079,18 @@ class DWSIMAgentV2:
                 self._turn_client = primary_client
                 return resp
 
+        # Ablation provider lock: a defensible ablation pins ONE provider+model
+        # across all conditions, so silent cross-provider failover (which would
+        # swap the model under test mid-study) must be disabled. When locked,
+        # the turn fails on the primary rather than failing over.
+        try:
+            from ablation_config import ablation as _abl
+            if _abl.lock_provider:
+                self._skipped_providers["failover"] = "provider locked (ablation)"
+                return None
+        except Exception:
+            pass
+
         # Cross-provider failover — only if primary exhausted retries AND
         # enough budget remains. SDK setup for a new provider can itself
         # take seconds (DNS, TLS, key validation), so require >= 5s of
@@ -4172,6 +4207,15 @@ class DWSIMAgentV2:
         if budget_t0 is None:
             budget_t0 = time.monotonic()
 
+        # Ablation determinism: in deterministic mode every attempt uses
+        # temperature 0 (no retry-temperature diversity), so a repeated run is
+        # reproducible. Otherwise the normal diversity schedule is preserved.
+        try:
+            from ablation_config import ablation as _abl
+            _temps = _abl.retry_temperatures(_RETRY_TEMPERATURES)
+        except Exception:
+            _temps = _RETRY_TEMPERATURES
+
         for attempt in range(_LLM_MAX_ATTEMPTS):
             # Check aggregate budget before each attempt
             elapsed = time.monotonic() - budget_t0
@@ -4182,7 +4226,7 @@ class DWSIMAgentV2:
                 )
                 break
 
-            retry_temp = _RETRY_TEMPERATURES[min(attempt, len(_RETRY_TEMPERATURES) - 1)]
+            retry_temp = _temps[min(attempt, len(_temps) - 1)]
             _orig_temp = getattr(llm_client, "temperature", 0.0)
             if attempt > 0 and retry_temp > 0:
                 llm_client.temperature = retry_temp

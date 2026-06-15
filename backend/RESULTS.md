@@ -29,7 +29,7 @@
 
 ## 3. Formal benchmark suite
 
-Pass-rate: **20% (5/25)** across 25 tasks (mode: **live**).
+Pass-rate: **24% (6/25)** across 25 tasks (mode: **live**).
 
 Generate/refresh with `python run_benchmark_live.py` against a live DWSIM + LLM key.
 

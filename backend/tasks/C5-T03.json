@@ -1,0 +1,35 @@
+{
+  "task_id": "C5-T03",
+  "category": "parametric_study",
+  "complexity": 3,
+  "prompt": "Find the optimal methanol inlet temperature that maximises water outlet temperature without the water boiling (keep outlet T below 99°C). Search 60°C to 120°C.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "optimal_T_identified",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent identifies optimal point ≈ 100°C (phase transition onset)"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Water outlet VF < 0.1 (no boiling)",
+      "check_type": "VF_range",
+      "params": {
+        "tag": "WaterOut",
+        "max": 0.1
+      }
+    }
+  ],
+  "expected_tools": [
+    "optimize_parameter",
+    "get_simulation_results"
+  ],
+  "human_time_min": 30.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

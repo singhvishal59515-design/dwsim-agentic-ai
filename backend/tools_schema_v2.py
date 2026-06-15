@@ -1958,6 +1958,93 @@ DWSIM_TOOLS = [
         },
     },
 
+    # ── Thermodynamic methods assistant (Aspen Methods Assistant equivalent) ─
+    {
+        "name": "thermo_method_assistant",
+        "description": (
+            "Thermodynamic Intelligence (Aspen Methods-Assistant equivalent), "
+            "grounded in DWSIM's 28 installed packages mapped to Aspen names. "
+            "Actions: 'intelligence' (from a compound list → auto-select package "
+            "+ credible alternatives + defensible fidelity statement), "
+            "'candidates' (ranked packages to feed multi_model_uncertainty), "
+            "'recommend' (pick from flags), 'resolve' (Aspen name e.g. ELECNRTL → "
+            "DWSIM package), 'classify', 'catalogue' (full list + Aspen gaps). "
+            "Always returns engine-usable names."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": [],
+            "properties": {
+                "action":  {"type": "string",
+                            "enum": ["intelligence", "candidates", "recommend",
+                                     "resolve", "classify", "catalogue"],
+                            "description": "Default 'catalogue'. Prefer "
+                                           "'intelligence' for a full answer."},
+                "compounds": {"type": "array", "items": {"type": "string"},
+                              "description": "Compound list for intelligence / "
+                                             "candidates / classify."},
+                "temperature_C": {"type": "number"},
+                "model":   {"type": "string",
+                            "description": "For action='resolve': the requested/"
+                                           "Aspen model name to map to DWSIM."},
+                "electrolyte":     {"type": "boolean"},
+                "acid_gas_amine":  {"type": "boolean"},
+                "polar":           {"type": "boolean"},
+                "hydrocarbon":     {"type": "boolean"},
+                "water_only":      {"type": "boolean"},
+                "natural_gas":     {"type": "boolean"},
+                "refinery_heavy":  {"type": "boolean"},
+                "have_binary_data":{"type": "boolean"},
+                "pressure_bar":    {"type": "number"},
+            },
+        },
+    },
+
+    # ── Multi-model thermodynamic uncertainty ───────────────────────────────
+    {
+        "name": "multi_model_uncertainty",
+        "description": (
+            "Quantify THERMODYNAMIC model-form uncertainty: build and solve the "
+            "SAME flowsheet under several property packages and report how much "
+            "each output moves with the package choice. Returns per-output spread "
+            "(mean, std, range, relative-spread %) and whether the result is "
+            "ROBUST (insensitive to the model) or MODEL-DEPENDENT. "
+            "Use when the user asks 'how much does my result depend on the "
+            "thermo package?', 'is Peng-Robinson good enough here?', or wants a "
+            "defensible uncertainty statement for a report. Takes the SAME spec "
+            "shape as build_flowsheet_atomic (the property_package field is "
+            "overridden per model). Note: it runs one full build+solve per "
+            "package, so 3 packages ≈ 3 solves."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["spec"],
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "description": ("Flowsheet spec (build_flowsheet_atomic shape: "
+                                    "compounds, objects, connections, feed_specs, "
+                                    "unit_op_specs). property_package is overridden "
+                                    "per model and may be omitted."),
+                },
+                "property_packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": ("Packages to compare, e.g. ['Peng-Robinson "
+                                    "(PR)', 'Soave-Redlich-Kwong (SRK)', 'NRTL']. "
+                                    "Default is that trio, filtered to installed."),
+                },
+                "observe_props": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": ("Stream properties to compare. Default "
+                                    "['temperature_C','pressure_bar',"
+                                    "'mass_flow_kgh','vapor_fraction']."),
+                },
+            },
+        },
+    },
+
     # ── Compound Property Database ───────────────────────────────────────────
     {
         "name": "get_compound_properties",

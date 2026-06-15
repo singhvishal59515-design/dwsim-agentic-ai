@@ -1,0 +1,53 @@
+{
+  "task_id": "C2-T03",
+  "category": "multi_unit_creation",
+  "complexity": 2,
+  "prompt": "Create a heat exchanger between hot methanol (80°C, 5 bar, 25000 kg/h) and cold water (25°C, 1 atm, 15000 kg/h). Area=250 m², U=450 W/(m²·K). Peng-Robinson.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "WaterOut",
+      "property": "temperature_C",
+      "operator": ">",
+      "value": 55.0,
+      "tolerance_pct": 2.0,
+      "description": "Water outlet heated above feed"
+    },
+    {
+      "stream_tag": "MethanolOut",
+      "property": "temperature_C",
+      "operator": "<",
+      "value": 80.0,
+      "tolerance_pct": 2.0,
+      "description": "Methanol outlet cooled below feed"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Energy balance: Q_cold ≈ Q_hot",
+      "check_type": "mass_balance",
+      "params": {}
+    },
+    {
+      "description": "No phase change in cold stream (liquid water)",
+      "check_type": "VF_range",
+      "params": {
+        "tag": "WaterOut",
+        "min": 0.0,
+        "max": 0.05
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 22.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

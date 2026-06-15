@@ -1,0 +1,33 @@
+{
+  "task_id": "C5-T01",
+  "category": "parametric_study",
+  "complexity": 2,
+  "prompt": "How does the water outlet temperature change as methanol inlet temperature varies from 60°C to 120°C in steps of 10°C?",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "monotonic_trend",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent reports 7 data points with correct monotonic trend"
+    },
+    {
+      "stream_tag": "response",
+      "property": "mentions_phase_transition",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent identifies the non-linearity/plateau at 100°C"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "parametric_study"
+  ],
+  "human_time_min": 20.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

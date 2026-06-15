@@ -1,0 +1,42 @@
+{
+  "task_id": "C7-T01",
+  "category": "reactor",
+  "complexity": 3,
+  "prompt": "Create a conversion reactor for ethanol dehydration to ethylene. Feed: pure ethanol at 400°C, 1 atm, 10 kmol/h. Conversion 85%. Use Peng-Robinson.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "Product",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 400.0,
+      "tolerance_pct": 5.0,
+      "description": "Reactor outlet near specified temperature"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "T > 0 K",
+      "check_type": "T_positive",
+      "params": {}
+    },
+    {
+      "description": "P > 0",
+      "check_type": "P_positive",
+      "params": {}
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "set_reactor_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 35.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

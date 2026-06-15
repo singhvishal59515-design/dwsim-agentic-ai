@@ -1,0 +1,60 @@
+{
+  "task_id": "C6-T01",
+  "category": "distillation",
+  "complexity": 2,
+  "prompt": "Create a shortcut distillation column to separate 50/50 benzene-toluene mixture. Feed: 100 kmol/h at 80°C, 1 atm. Reflux ratio 1.5, 10 stages. Use Peng-Robinson.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "Distillate",
+      "property": "temperature_C",
+      "operator": "<",
+      "value": 85.0,
+      "tolerance_pct": 2.0,
+      "description": "Distillate (benzene-rich) below toluene boiling point"
+    },
+    {
+      "stream_tag": "Bottoms",
+      "property": "temperature_C",
+      "operator": ">",
+      "value": 85.0,
+      "tolerance_pct": 2.0,
+      "description": "Bottoms (toluene-rich) above benzene boiling point"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Mass balance: distillate + bottoms = feed",
+      "check_type": "mass_balance",
+      "params": {
+        "feed": "Feed",
+        "outlets": [
+          "Distillate",
+          "Bottoms"
+        ]
+      }
+    },
+    {
+      "description": "VF of distillate near 0 (condenser)",
+      "check_type": "VF_range",
+      "params": {
+        "tag": "Distillate",
+        "min": 0.0,
+        "max": 0.1
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 45.0,
+  "notes": "Primary industrially-relevant case study for Reviewer concern 2.3",
+  "setup_load": "",
+  "requires_fixture": false
+}

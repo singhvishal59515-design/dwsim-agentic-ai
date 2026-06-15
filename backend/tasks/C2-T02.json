@@ -1,0 +1,60 @@
+{
+  "task_id": "C2-T02",
+  "category": "multi_unit_creation",
+  "complexity": 2,
+  "prompt": "Build a two-stream mixer: Stream A is methanol at 30°C, 1 atm, 500 kg/h. Stream B is water at 60°C, 1 atm, 1000 kg/h. Mix them and report the outlet temperature. Use NRTL.",
+  "property_package": "NRTL",
+  "success_criteria": [
+    {
+      "stream_tag": "Product",
+      "property": "mass_flow_kgh",
+      "operator": "~=",
+      "value": 1500.0,
+      "tolerance_pct": 1.0,
+      "description": "Mass balance: 500+1000=1500 kg/h"
+    },
+    {
+      "stream_tag": "Product",
+      "property": "temperature_C",
+      "operator": "between",
+      "value": [
+        30.0,
+        60.0
+      ],
+      "tolerance_pct": 0.0,
+      "description": "Mixed T between 30°C and 60°C (energy balance)"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Mass balance in = out",
+      "check_type": "mass_balance",
+      "params": {
+        "feed": [
+          "FeedA",
+          "FeedB"
+        ],
+        "outlets": [
+          "Product"
+        ]
+      }
+    },
+    {
+      "description": "T_out between min(T_in) and max(T_in)",
+      "check_type": "T_order",
+      "params": {}
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "save_and_solve"
+  ],
+  "human_time_min": 20.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

@@ -1,0 +1,56 @@
+{
+  "task_id": "C2-T04",
+  "category": "multi_unit_creation",
+  "complexity": 2,
+  "prompt": "Build a pump-heater system: pump water from 1 bar to 3 bar (efficiency 80%), then heat from ambient (25°C) to 70°C. Feed: 5 kg/s. Use Steam Tables.",
+  "property_package": "Steam Tables (IAPWS-IF97)",
+  "success_criteria": [
+    {
+      "stream_tag": "FinalProduct",
+      "property": "pressure_bar",
+      "operator": "~=",
+      "value": 3.0,
+      "tolerance_pct": 3.0,
+      "description": "Final pressure ≈ 3 bar"
+    },
+    {
+      "stream_tag": "FinalProduct",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 70.0,
+      "tolerance_pct": 2.0,
+      "description": "Final temperature ≈ 70°C"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Intermediate stream P > Feed P",
+      "check_type": "T_order",
+      "params": {
+        "hot": "Intermediate",
+        "cold": "Feed",
+        "prop": "pressure_bar"
+      }
+    },
+    {
+      "description": "Final T > Intermediate T",
+      "check_type": "T_order",
+      "params": {
+        "hot": "FinalProduct",
+        "cold": "Intermediate"
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_unit_op_property",
+    "save_and_solve"
+  ],
+  "human_time_min": 25.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": false
+}

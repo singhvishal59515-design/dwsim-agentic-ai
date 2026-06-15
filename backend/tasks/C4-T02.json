@@ -1,0 +1,41 @@
+{
+  "task_id": "C4-T02",
+  "category": "property_modification",
+  "complexity": 1,
+  "prompt": "Change the feed composition to 80% methanol and 20% water and re-simulate.",
+  "property_package": "NRTL",
+  "success_criteria": [
+    {
+      "stream_tag": "Feed",
+      "property": "composition_methanol",
+      "operator": "~=",
+      "value": 0.8,
+      "tolerance_pct": 1.0,
+      "description": "Feed composition set to 80% methanol"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Mole fractions sum to 1.0",
+      "check_type": "mass_balance",
+      "params": {}
+    },
+    {
+      "description": "VF in [0,1]",
+      "check_type": "VF_range",
+      "params": {
+        "min": 0.0,
+        "max": 1.0
+      }
+    }
+  ],
+  "expected_tools": [
+    "set_stream_composition",
+    "run_simulation",
+    "get_simulation_results"
+  ],
+  "human_time_min": 6.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

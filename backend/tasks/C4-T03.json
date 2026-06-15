@@ -1,0 +1,41 @@
+{
+  "task_id": "C4-T03",
+  "category": "property_modification",
+  "complexity": 2,
+  "prompt": "Increase the heater duty to achieve 95°C outlet and confirm the simulation converges.",
+  "property_package": "Steam Tables (IAPWS-IF97)",
+  "success_criteria": [
+    {
+      "stream_tag": "Product",
+      "property": "temperature_C",
+      "operator": "~=",
+      "value": 95.0,
+      "tolerance_pct": 2.0,
+      "description": "Product temperature ≈ 95°C after modification"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Product T > Feed T",
+      "check_type": "T_order",
+      "params": {
+        "hot": "Product",
+        "cold": "Feed"
+      }
+    },
+    {
+      "description": "T < boiling point at given P",
+      "check_type": "T_positive",
+      "params": {}
+    }
+  ],
+  "expected_tools": [
+    "set_unit_op_property",
+    "run_simulation",
+    "get_simulation_results"
+  ],
+  "human_time_min": 10.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

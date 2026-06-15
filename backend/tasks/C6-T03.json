@@ -1,0 +1,27 @@
+{
+  "task_id": "C6-T03",
+  "category": "distillation",
+  "complexity": 3,
+  "prompt": "Analyse the loaded distillation flowsheet. Increase reflux ratio from current value to 2.0 and report how distillate purity changes.",
+  "property_package": "Peng-Robinson (PR)",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "reports_purity_increase",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent correctly identifies purity increases with reflux ratio"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "get_column_properties",
+    "set_column_property",
+    "run_simulation"
+  ],
+  "human_time_min": 20.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}

@@ -901,6 +901,32 @@ def _route_set_variable(bridge, tag: str, prop: str,
         return False
 
 
+def _run_with_timeout(func, timeout_sec: float = 20.0):
+    """Run `func()` in a daemon thread and abandon it if it exceeds timeout_sec.
+    Returns (ok, value_or_exc, timed_out). The caller never blocks past the
+    timeout; a genuinely stuck native call leaks its daemon thread (a Python
+    thread cannot interrupt a blocked .NET call) — an acceptable trade for not
+    hanging the request. BUG-4 defensive guard for dwsim_get_stream."""
+    import threading
+    box = {"ok": False, "val": None, "exc": None}
+
+    def _target():
+        try:
+            box["val"] = func()
+            box["ok"] = True
+        except Exception as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    th = threading.Thread(target=_target, daemon=True)
+    th.start()
+    th.join(timeout=timeout_sec)
+    if th.is_alive():
+        return (False, None, True)
+    if box["exc"] is not None:
+        return (False, box["exc"], False)
+    return (True, box["val"], False)
+
+
 class DWSIMBridgeV2:
 
     def __init__(self, dll_folder: Optional[str] = None):
@@ -920,6 +946,43 @@ class DWSIMBridgeV2:
         # but save_and_solve not yet run).  Used by the idempotency guard so
         # a *solved* flowsheet does not block a fresh new_flowsheet call.
         self._building: bool = False
+
+        # BUG #6: track whether the flowsheet has been modified since the last
+        # solve, so reads of calculated properties (enthalpy, density, downstream
+        # streams) can warn that they are stale instead of returning silently
+        # out-of-date numbers. Marked on every successful write, cleared on a
+        # successful solve, and stamped onto get_stream responses.
+        try:
+            from bridge_patches_v4 import DirtyState
+            self._dirty = DirtyState()
+        except Exception:
+            self._dirty = None
+
+    def _mark_dirty(self, reason: str) -> None:
+        if self._dirty is not None:
+            try: self._dirty.mark(reason)
+            except Exception: pass
+
+    def _clear_dirty(self) -> None:
+        if self._dirty is not None:
+            try: self._dirty.clear()
+            except Exception: pass
+
+    def _stamp_dirty(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        if self._dirty is not None:
+            try: return self._dirty.stamp(response)
+            except Exception: return response
+        return response
+
+    def _known_objects_split(self):
+        """BUG #7: category-aware {streams, unit_ops} tag lists for error
+        suggestions, so unit-op tags never appear in 'stream not found' hints."""
+        try:
+            from bridge_patches_v4 import split_known_objects
+            return split_known_objects(self.list_objects())
+        except Exception:
+            tags = list(self._active_tag_cache().values())[:20]
+            return {"known_streams": tags, "known_unit_ops": []}
 
     # ── shortcuts to active flowsheet ─────────────────────────────────────────
 
@@ -1654,25 +1717,32 @@ class DWSIMBridgeV2:
         if not isinstance(raw, dict) or not raw.get("success"):
             return {"success": False, "streams": [], "unit_ops": [],
                     "objects": [], "error": (raw or {}).get("error", "")}
-        streams, unit_ops = [], []
+        streams, unit_ops, energy_streams = [], [], []
         for o in raw.get("objects") or []:
             if not isinstance(o, dict) or not o.get("tag"):
                 continue
             cat = (o.get("category") or "").lower()
             tn  = (o.get("type")     or "").lower()
-            if "stream" in cat or "materialstream" in tn or tn == "stream":
-                streams.append(o)
-            elif cat == "energy" or "energystream" in tn:
-                # Energy streams aren't decision variables; skip
+            # Energy streams MUST be tested before the generic material-stream
+            # check: "stream" is a substring of "energystream", so the old
+            # `"stream" in cat` test bucketed energy streams into streams[] and
+            # offered them as decision variables. They are not material streams —
+            # keep them out of streams[] but surface them in their own list.
+            if "energystream" in tn or "energystream" in cat or cat == "energy":
+                energy_streams.append(o)
                 continue
+            if "materialstream" in tn or "materialstream" in cat \
+                    or tn == "stream" or cat == "stream":
+                streams.append(o)
             else:
                 unit_ops.append(o)
         return {
-            "success":  True,
-            "streams":  streams,
-            "unit_ops": unit_ops,
-            "objects":  raw.get("objects", []),
-            "count":    raw.get("count", len(raw.get("objects") or [])),
+            "success":        True,
+            "streams":        streams,
+            "energy_streams": energy_streams,
+            "unit_ops":       unit_ops,
+            "objects":        raw.get("objects", []),
+            "count":          raw.get("count", len(raw.get("objects") or [])),
         }
 
     # ── property reading ──────────────────────────────────────────────────────
@@ -1680,9 +1750,12 @@ class DWSIMBridgeV2:
     def get_stream_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)
         if obj is None:
-            known = list(self._active_tag_cache().values())[:20]
+            # BUG #7: keep unit-op tags out of the stream suggestion list.
+            k = self._known_objects_split()
             return {"success": False,
-                    "error": f"Stream '{tag}' not found. Known: {known}"}
+                    "error": (f"Stream '{tag}' not found. "
+                              f"Known streams: {k['known_streams']}. "
+                              f"(Unit operations, not streams: {k['known_unit_ops']})")}
 
         props: Dict[str, Any] = {"tag": tag}
         try:
@@ -1771,7 +1844,32 @@ class DWSIMBridgeV2:
                 "Some properties are None — stream may not have converged. "
                 "Run simulation first or check recycle loop convergence."
             )
-        return result
+        # BUG #6: warn if the flowsheet was modified since the last solve.
+        return self._stamp_dirty(result)
+
+    def get_stream_properties_safe(self, tag: str, timeout_sec: float = 20.0,
+                                   max_retries: int = 2) -> Dict[str, Any]:
+        """BUG-4: timeout+retry wrapper around get_stream_properties for the
+        user/MCP-facing path (dwsim_get_stream → /stream/properties). A stream
+        read normally takes well under a second; this guards the rare case where
+        a .NET reflection read or console-noise flood blocks, so the request
+        returns an actionable error instead of hanging the MCP transport
+        (~4-min cap). NOT used in the optimizer's hot read loop, to avoid
+        per-call thread overhead."""
+        last = ""
+        for attempt in range(1, max_retries + 1):
+            ok, val, timed_out = _run_with_timeout(
+                lambda: self.get_stream_properties(tag), timeout_sec)
+            if ok and isinstance(val, dict):
+                val["retry_count"] = attempt - 1
+                return val
+            if timed_out:
+                last = f"timeout after {timeout_sec:.0f}s (attempt {attempt}/{max_retries})"
+            else:
+                last = f"{val} (attempt {attempt}/{max_retries})"
+        return {"success": False, "tag": tag,
+                "error": f"get_stream_properties failed: {last}",
+                "retry_count": max_retries, "needs_resolve": True}
 
     def get_object_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)
@@ -1812,9 +1910,12 @@ class DWSIMBridgeV2:
         """
         obj = self._find_object(tag)
         if obj is None:
+            # BUG #7: keep unit-op tags out of the stream suggestion list.
+            k = self._known_objects_split()
             return {"success": False,
-                    "error": f"Stream '{tag}' not found. "
-                             f"Known: {list(self._active_tag_cache().values())[:20]}"}
+                    "error": (f"Stream '{tag}' not found. "
+                              f"Known streams: {k['known_streams']}. "
+                              f"(Unit operations, not streams: {k['known_unit_ops']})")}
 
         # Capture old value for undo support BEFORE we write the new one
         old_value: Any = None
@@ -1827,16 +1928,29 @@ class DWSIMBridgeV2:
                 "molarflow":   "molar_flow_kmolh",
                 "vaporfraction": "vapor_fraction",
             }
+            # BUG #2 root cause: get_stream_properties nests values under
+            # "properties", so the old top-level lookup was always None and
+            # old_value was reported null on every write. Read the nested dict.
+            old_flat = old_props.get("properties", old_props) if isinstance(old_props, dict) else {}
             lookup_key = _PROP_TO_KEY.get(property_name.lower().replace(" ", "").replace("_", ""))
-            if lookup_key and old_props.get(lookup_key) is not None:
-                old_value = old_props[lookup_key]
+            if lookup_key and old_flat.get(lookup_key) is not None:
+                old_value = old_flat[lookup_key]
         except Exception:
             pass
 
         si_value, si_unit, dot_attr = _convert_to_si(property_name, value, unit)
         if dot_attr is None:
-            return {"success": False,
-                    "error": f"Unknown property '{property_name}'"}
+            # BUG #5: case-insensitive resolve with a did-you-mean suggestion
+            # instead of a bare "Unknown property".
+            err = f"Unknown property '{property_name}'"
+            try:
+                from bridge_patches_v4 import PropertyNames
+                _canon, _msg = PropertyNames.resolve(property_name)
+                if _msg:
+                    err = _msg
+            except Exception:
+                pass
+            return {"success": False, "error": err}
 
         # Physical validation — reject impossible values before touching the solver.
         # SI basis: T in K, P in Pa, flows in kg/s or mol/s, VF dimensionless [0,1].
@@ -1951,11 +2065,46 @@ class DWSIMBridgeV2:
                     "error": f"Could not set '{dot_attr}' on '{tag}'",
                     "tried": tried}
 
-        return {"success": True,
-                "message":   f"Set {property_name}={value}{unit} on '{tag}'",
-                "old_value": old_value,
-                "new_value": value,
-                "methods":   tried[:3]}
+        # BUG #2: read the value back through the SAME getter and verify it
+        # actually persisted, rather than echoing the requested value as if it
+        # had. A property that is calculated (not specifiable) on this stream
+        # will silently not change — surface that instead of reporting success.
+        # Compare in SI (si_value) against the SI read-back key, so a write in
+        # any unit (kg/s vs kg/h, K vs C) verifies correctly.
+        _SI_KEY = {"Temperature": "temperature_K", "Pressure": "pressure_Pa",
+                   "MassFlow": "mass_flow_kg_s", "MolarFlow": "molar_flow_mol_s",
+                   "VaporFraction": "vapor_fraction"}
+        read_back: Any = None
+        verified: Optional[bool] = None
+        try:
+            rb_props = self.get_stream_properties(tag)
+            rb_flat = rb_props.get("properties", rb_props) if isinstance(rb_props, dict) else {}
+            rb_key = _SI_KEY.get(dot_attr)
+            if rb_key and rb_flat.get(rb_key) is not None:
+                read_back = rb_flat[rb_key]
+                verified = abs(float(read_back) - float(si_value)) <= \
+                    1e-4 * max(abs(float(si_value)), 1.0)
+        except Exception:
+            pass
+
+        # BUG #6: a successful spec write makes calculated properties stale.
+        self._mark_dirty(f"set {tag}.{property_name}={value}{unit}")
+
+        result = {"success": True,
+                  "message":     f"Set {property_name}={value}{unit} on '{tag}'",
+                  "old_value":   old_value,
+                  "requested":   value,
+                  "new_value":   value,
+                  "read_back_si": read_back,
+                  "read_back_si_unit": si_unit,
+                  "verified":    verified,
+                  "methods":     tried[:3]}
+        if verified is False:
+            result["warning"] = (
+                f"Write-verification: requested {si_value:g} {si_unit} but read "
+                f"back {read_back} {si_unit}. '{property_name}' may be a "
+                f"calculated (not specifiable) property on this stream.")
+        return result
 
     def set_unit_op_property(self, tag: str, property_name: str,
                              value: Any, unit: str = "") -> Dict[str, Any]:
@@ -1971,6 +2120,11 @@ class DWSIMBridgeV2:
         obj = self._find_object(tag)
         if obj is None:
             return {"success": False, "error": f"Object '{tag}' not found"}
+        # BUG #6: modifying a unit-op spec invalidates the last solve. Marked at
+        # entry (the method's purpose is to mutate) and cleared on the next
+        # successful solve; a false mark on a failed write only costs a redundant
+        # solve, never a stale-but-silent read.
+        self._mark_dirty(f"set {tag}.{property_name}={value}{unit}")
         # LLM sometimes passes numeric values as strings — coerce to float/int
         if isinstance(value, str):
             try:
@@ -2643,11 +2797,35 @@ class DWSIMBridgeV2:
             if physical_issues:
                 warnings.append({"tag": tag, "issues": physical_issues})
 
+        # Unit operations were previously never checked: only self.state.streams
+        # was iterated, so an unconverged heater/column/reactor never surfaced
+        # and convergence_check could report all_converged with a unit op that
+        # had not solved (e.g. H-101 absent entirely). Iterate the unit ops and
+        # use the .NET `Calculated` flag DWSIM sets after a successful solve.
+        unit_ops_status = []
+        for tag in getattr(self.state, "unit_ops", []) or []:
+            obj = self._find_object(tag)
+            if obj is None:
+                missing.append(tag)
+                unit_ops_status.append({"tag": tag, "calculated": None,
+                                        "note": "not found"})
+                continue
+            try:
+                calc = bool(getattr(obj, "Calculated", False))
+            except Exception:
+                calc = False
+            unit_ops_status.append({"tag": tag, "calculated": calc})
+            if calc:
+                converged.append(tag)
+            else:
+                not_converged.append({"tag": tag, "missing": ["not calculated"]})
+
         all_ok = len(not_converged) == 0 and len(missing) == 0
         return {
             "all_converged":   all_ok,
             "converged":       converged,
             "not_converged":   not_converged,
+            "unit_ops":        unit_ops_status,
             "inaccessible":    missing,
             "physical_warnings": warnings,
         }
@@ -2696,47 +2874,66 @@ class DWSIMBridgeV2:
         return {"success": True, "compounds": compounds,
                 "count": len(compounds)}
 
+    @staticmethod
+    def _pp_display_name(pp) -> Optional[str]:
+        """Extract a human name from a DWSIM property-package object.
+
+        On DWSIM 9.0.5 `pp.Name` is .NET null (pythonnet -> Python None ->
+        str() == 'None', the source of the bogus property_package:'None').
+        The real name lives in `.Tag` ('Peng-Robinson (PR)') or `.DisplayName`
+        ('Peng-Robinson'). Try the good attributes first and reject null-ish
+        values so we never return the literal string 'None'.
+        """
+        for attr in ("Tag", "DisplayName", "Name"):
+            try:
+                val = getattr(pp, attr, None)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            s = str(val).strip()
+            if s and s.lower() not in ("none", "null"):
+                return s
+        return None
+
     def _read_property_package(self, fs) -> str:
         """Try various DWSIM API paths to read the property package name."""
-        # Path 1: fs.SelectedPropertyPackage
+        # Path 1: a single selected package directly on the flowsheet.
         for attr in ("SelectedPropertyPackage", "PropertyPackage",
                      "ThermodynamicsPackage"):
             try:
-                val = getattr(fs, attr)
+                val = getattr(fs, attr, None)
                 if val is not None:
-                    name = str(val)
-                    # It might be an object with a .Name property
-                    try: name = str(val.Name)
-                    except Exception: pass
-                    if name and name not in ("None", ""):
+                    name = self._pp_display_name(val)
+                    if name:
                         return name
             except Exception:
                 pass
 
-        # Path 2: iterate property packages collection
+        # Path 2: iterate the property-packages collection (the real path on
+        # DWSIM 9.0.5 — fs.PropertyPackages is Dictionary[String, IPropertyPackage]).
         for coll_attr in ("PropertyPackages", "ThermodynamicsPackages"):
             try:
-                coll = getattr(fs, coll_attr)
+                coll = getattr(fs, coll_attr, None)
                 if coll is None:
                     continue
+                names = []
                 try:
-                    names = []
                     for k in coll.Keys:
-                        pp = coll[k]
-                        try: names.append(str(pp.Name))
-                        except Exception: names.append(str(k))
-                    if names:
-                        return ", ".join(names)
+                        nm = self._pp_display_name(coll[k])
+                        if nm:
+                            names.append(nm)
                 except Exception:
-                    pass
-                # Try as list
-                try:
-                    items = list(coll)
-                    if items:
-                        try: return str(items[0].Name)
-                        except Exception: return str(items[0])
-                except Exception:
-                    pass
+                    try:
+                        for pp in list(coll):
+                            nm = self._pp_display_name(pp)
+                            if nm:
+                                names.append(nm)
+                    except Exception:
+                        pass
+                if names:
+                    # de-dupe, preserve order
+                    return ", ".join(dict.fromkeys(names))
             except Exception:
                 pass
 
@@ -5541,7 +5738,14 @@ class DWSIMBridgeV2:
         # ── Pre-solve silent-failure prevention (SF-02, SF-06, SF-07) ───────
         # Run before the expensive solve so we can surface problems loudly
         # instead of returning a convergent-but-wrong result.
-        pre_warnings = self._pre_solve_sf_check()
+        # Ablation: the no_safety / direct_llm condition disables this too, so
+        # the SafetyValidator contributes nothing in that condition.
+        try:
+            from ablation_config import ablation as _abl_pre
+            _pre_safety_off = _abl_pre.disable_safety
+        except Exception:
+            _pre_safety_off = False
+        pre_warnings = [] if _pre_safety_off else self._pre_solve_sf_check()
         if pre_warnings:
             return {
                 "success": False,
@@ -5569,7 +5773,14 @@ class DWSIMBridgeV2:
                 # ── Safety Validation + SF-05 auto-correction (post-solve) ───
                 safety_warnings = []
                 sf05_corrections = 0
+                # Ablation: the no_safety / direct_llm condition skips the
+                # post-solve SafetyValidator entirely (the raise is caught by
+                # this block's own `except Exception` below, leaving
+                # safety_warnings empty and no SF-05 auto-correction).
                 try:
+                    from ablation_config import ablation as _abl_sv
+                    if _abl_sv.disable_safety:
+                        raise RuntimeError("SafetyValidator disabled (ablation)")
                     from safety_validator import SafetyValidator
                     _topology = {
                         "connections": getattr(self, "_last_topology_connections", []),
@@ -5646,6 +5857,7 @@ class DWSIMBridgeV2:
                         "noise to exact 0.0 or 1.0 (SF-05 auto-correction). "
                         "Original values stored in stream._sf05_original_vf."
                     )
+                self._clear_dirty()   # BUG #6: solve succeeded — reads are fresh
                 return result
             else:
                 return {"success": False,
@@ -5660,6 +5872,7 @@ class DWSIMBridgeV2:
                         with redirect_stdout(_sink), redirect_stderr(_sink):
                             fn(fs)
                         self._building = False   # build phase done
+                        self._clear_dirty()      # BUG #6: solve succeeded
                         sr = self.get_simulation_results()
                         return {
                             "success":        True,
@@ -5779,6 +5992,116 @@ class DWSIMBridgeV2:
         return result
 
     # ── Atomic flowsheet build ────────────────────────────────────────────────
+
+    def multi_model_uncertainty(
+        self,
+        spec: Dict[str, Any],
+        property_packages: Optional[List[str]] = None,
+        observe_props: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Quantify THERMODYNAMIC model-form uncertainty: build and solve the SAME
+        flowsheet `spec` (build_flowsheet_atomic shape) under several property
+        packages and report, for every stream output, the spread across models.
+
+        This is the honest counter to a commercial tool's validated-thermo edge —
+        instead of claiming fidelity parity, it tells the user how much a result
+        depends on the package choice (robust vs model-dependent), in one call.
+
+        property_packages : default ["Peng-Robinson (PR)", "Soave-Redlich-Kwong
+                            (SRK)", "NRTL"], filtered to what DWSIM has installed.
+        observe_props     : stream properties to compare; default T/P/flow/VF.
+        """
+        import copy as _copy
+        if not isinstance(spec, dict) or not spec.get("objects") or not spec.get("compounds"):
+            return {"success": False,
+                    "error": "A full spec (compounds + objects) is required — the "
+                             "same shape as build_flowsheet_atomic. Build the "
+                             "flowsheet from a spec first, then pass that spec."}
+
+        # Smart default: compare the THEORY-APPROPRIATE candidate packages for
+        # THIS system (e.g. Steam/CoolProp/PR for water; GERG/PR/SRK for natural
+        # gas; activity models for polar low-P), not a blind PR/SRK/NRTL trio.
+        # This is what makes the uncertainty "intelligent": the spread is over
+        # models that could each plausibly be correct for the chemistry.
+        default_pkgs = ["Peng-Robinson (PR)", "Soave-Redlich-Kwong (SRK)", "NRTL"]
+        if not property_packages:
+            try:
+                from thermo_models import candidate_packages
+                # Use a representative feed P/T if available in the spec.
+                _P, _T = 1.01325, 25.0
+                for fs in (spec.get("feed_specs") or []):
+                    if fs.get("pressure") is not None:
+                        _u = (fs.get("pressure_unit") or "bar").lower()
+                        _v = float(fs["pressure"])
+                        _P = (_v if "bar" in _u else _v/1e5 if _u == "pa"
+                              else _v*1.01325 if _u == "atm" else _v)
+                    if fs.get("temperature") is not None:
+                        _tu = (fs.get("temperature_unit") or "C").lower()
+                        _tv = float(fs["temperature"])
+                        _T = (_tv if _tu.startswith("c") else _tv-273.15
+                              if _tu.startswith("k") else _tv)
+                    break
+                cand = candidate_packages(spec.get("compounds") or [], _P, _T)
+                if cand.get("candidates"):
+                    default_pkgs = cand["candidates"]
+            except Exception:
+                pass
+        pkgs = list(property_packages or default_pkgs)
+        try:
+            avail = [str(p.Key) for p in self._mgr.AvailablePropertyPackages]
+        except Exception:
+            avail = []
+        if avail:
+            matched = [p for p in pkgs
+                       if any(p.lower() in a.lower() or a.lower() in p.lower()
+                              for a in avail)]
+            pkgs = matched or pkgs
+        # de-dupe, preserve order
+        pkgs = list(dict.fromkeys(pkgs))
+        observe_props = observe_props or ["temperature_C", "pressure_bar",
+                                          "mass_flow_kgh", "vapor_fraction"]
+
+        per_model: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        model_status: Dict[str, str] = {}
+        base_name = str(spec.get("name") or "mmu")
+
+        for pp in pkgs:
+            s = _copy.deepcopy(spec)
+            s["property_package"] = pp
+            s["name"] = f"{base_name}_{''.join(ch if ch.isalnum() else '_' for ch in pp)[:24]}"
+            try:
+                r = self.build_flowsheet_atomic(s)
+            except Exception as exc:
+                model_status[pp] = f"build raised: {exc}"
+                continue
+            solved = bool(r.get("success") and
+                          (r.get("converged") or r.get("solved")
+                           or r.get("stream_results")))
+            if not solved:
+                model_status[pp] = (f"did not solve: "
+                                    f"{r.get('error') or r.get('build_errors')}")
+                continue
+            obs: Dict[str, Dict[str, Any]] = {}
+            for tag in (self.state.streams or []):
+                gp = self.get_stream_properties(tag)
+                props = gp.get("properties", {}) if isinstance(gp, dict) and gp.get("success") else {}
+                sel = {k: props.get(k) for k in observe_props if props.get(k) is not None}
+                if sel:
+                    obs[tag] = sel
+            per_model[pp] = obs
+            model_status[pp] = "ok"
+
+        if len(per_model) < 2:
+            return {"success": False,
+                    "error": "Fewer than two packages solved — cannot compare "
+                             "models. See model_status for why.",
+                    "model_status": model_status}
+
+        from multimodel_uncertainty import aggregate_model_spread
+        agg = aggregate_model_spread(per_model)
+        agg["model_status"] = model_status
+        return agg
 
     def build_flowsheet_atomic(self, spec: Dict[str, Any]) -> Dict[str, Any]:
         """

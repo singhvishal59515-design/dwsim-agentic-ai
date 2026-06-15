@@ -40,8 +40,9 @@ class _MisroutingBridge:
         # The bug: reports success but does NOT write the unit-op setpoint.
         return {"success": True}
 
-    def set_unit_op_property(self, tag, prop, value):
+    def set_unit_op_property(self, tag, prop, value, unit=""):
         self.props[(tag, prop)] = float(value)
+        self.last_unit = unit
         return {"success": True}
 
     def run_simulation(self):
@@ -80,3 +81,15 @@ def test_write_helper_prefers_strict_unitop_setter():
     assert ok is True
     # Strict-first means the real (unit-op) write happened, not the no-op stream one.
     assert br.props[("H-101", "outlet_temperature")] == 55.0
+
+
+def test_write_helper_passes_unit_through():
+    # Regression: _write_object_property dropped the unit, so an outlet_pressure
+    # decision variable of 3 "bar" was written to set_unit_op_property with no
+    # unit and interpreted as 3 Pa — the compressor did ~no work, the objective
+    # barely moved, and the optimizer drifted to a bound. Found by the live
+    # two-stage-compression case study (validate_compression_live.py).
+    from dwsim_native_optimizer import _write_object_property
+    br = _MisroutingBridge(lambda p: 0.0)
+    _write_object_property(br, "C1", "outlet_pressure", 3.0, "bar")
+    assert br.last_unit == "bar"

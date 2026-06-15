@@ -1,0 +1,47 @@
+{
+  "spec_version": "1.0",
+  "content_hash": "ae3fa4659c6e0a58",
+  "n_tasks": 25,
+  "task_ids": [
+    "C1-T01",
+    "C1-T02",
+    "C1-T03",
+    "C2-T01",
+    "C2-T02",
+    "C2-T03",
+    "C2-T04",
+    "C3-T01",
+    "C3-T02",
+    "C3-T03",
+    "C4-T01",
+    "C4-T02",
+    "C4-T03",
+    "C5-T01",
+    "C5-T02",
+    "C5-T03",
+    "C6-T01",
+    "C6-T02",
+    "C6-T03",
+    "C7-T01",
+    "C7-T02",
+    "C8-T01",
+    "C8-T02",
+    "C8-T03",
+    "C8-T04"
+  ],
+  "by_complexity": {
+    "1": 7,
+    "2": 11,
+    "3": 7
+  },
+  "categories": [
+    "convergence_repair",
+    "distillation",
+    "flowsheet_analysis",
+    "multi_unit_creation",
+    "parametric_study",
+    "property_modification",
+    "reactor",
+    "single_unit_creation"
+  ]
+}

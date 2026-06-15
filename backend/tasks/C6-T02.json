@@ -1,0 +1,46 @@
+{
+  "task_id": "C6-T02",
+  "category": "distillation",
+  "complexity": 3,
+  "prompt": "Design a methanol-water separation column to achieve 95 mol% methanol in distillate. Feed 100 kmol/h, 50% methanol at 65°C, 1 atm. Use NRTL. Report required reflux ratio.",
+  "property_package": "NRTL",
+  "success_criteria": [
+    {
+      "stream_tag": "Distillate",
+      "property": "composition_methanol",
+      "operator": ">",
+      "value": 0.9,
+      "tolerance_pct": 2.0,
+      "description": "Distillate methanol purity > 90%"
+    }
+  ],
+  "physical_constraints": [
+    {
+      "description": "Methanol mass balance",
+      "check_type": "mass_balance",
+      "params": {}
+    },
+    {
+      "description": "VF in [0,1]",
+      "check_type": "VF_range",
+      "params": {
+        "min": 0.0,
+        "max": 1.0
+      }
+    }
+  ],
+  "expected_tools": [
+    "new_flowsheet",
+    "add_object",
+    "connect_streams",
+    "set_stream_property",
+    "set_stream_composition",
+    "set_unit_op_property",
+    "save_and_solve",
+    "get_column_properties"
+  ],
+  "human_time_min": 60.0,
+  "notes": "Complex industrial distillation case — addresses reviewer 2.3",
+  "setup_load": "",
+  "requires_fixture": false
+}

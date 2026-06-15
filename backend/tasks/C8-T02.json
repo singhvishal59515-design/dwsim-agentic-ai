@@ -1,0 +1,27 @@
+{
+  "task_id": "C8-T02",
+  "category": "convergence_repair",
+  "complexity": 2,
+  "prompt": "The distillation column is not converging. Try increasing reflux ratio and re-run.",
+  "property_package": "any",
+  "success_criteria": [
+    {
+      "stream_tag": "response",
+      "property": "attempts_fix",
+      "operator": "~=",
+      "value": true,
+      "tolerance_pct": 0.0,
+      "description": "Agent modifies reflux and retries"
+    }
+  ],
+  "physical_constraints": [],
+  "expected_tools": [
+    "set_column_property",
+    "run_simulation",
+    "check_convergence"
+  ],
+  "human_time_min": 15.0,
+  "notes": "",
+  "setup_load": "",
+  "requires_fixture": true
+}
