@@ -901,6 +901,32 @@ def _route_set_variable(bridge, tag: str, prop: str,
         return False
 
 
+def _run_with_timeout(func, timeout_sec: float = 20.0):
+    """Run `func()` in a daemon thread and abandon it if it exceeds timeout_sec.
+    Returns (ok, value_or_exc, timed_out). The caller never blocks past the
+    timeout; a genuinely stuck native call leaks its daemon thread (a Python
+    thread cannot interrupt a blocked .NET call) — an acceptable trade for not
+    hanging the request. BUG-4 defensive guard for dwsim_get_stream."""
+    import threading
+    box = {"ok": False, "val": None, "exc": None}
+
+    def _target():
+        try:
+            box["val"] = func()
+            box["ok"] = True
+        except Exception as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    th = threading.Thread(target=_target, daemon=True)
+    th.start()
+    th.join(timeout=timeout_sec)
+    if th.is_alive():
+        return (False, None, True)
+    if box["exc"] is not None:
+        return (False, box["exc"], False)
+    return (True, box["val"], False)
+
+
 class DWSIMBridgeV2:
 
     def __init__(self, dll_folder: Optional[str] = None):
@@ -1691,7 +1717,7 @@ class DWSIMBridgeV2:
         if not isinstance(raw, dict) or not raw.get("success"):
             return {"success": False, "streams": [], "unit_ops": [],
                     "objects": [], "error": (raw or {}).get("error", "")}
-        streams, unit_ops = [], []
+        streams, unit_ops, energy_streams = [], [], []
         for o in raw.get("objects") or []:
             if not isinstance(o, dict) or not o.get("tag"):
                 continue
@@ -1700,8 +1726,10 @@ class DWSIMBridgeV2:
             # Energy streams MUST be tested before the generic material-stream
             # check: "stream" is a substring of "energystream", so the old
             # `"stream" in cat` test bucketed energy streams into streams[] and
-            # offered them as decision variables. They are not material streams.
+            # offered them as decision variables. They are not material streams —
+            # keep them out of streams[] but surface them in their own list.
             if "energystream" in tn or "energystream" in cat or cat == "energy":
+                energy_streams.append(o)
                 continue
             if "materialstream" in tn or "materialstream" in cat \
                     or tn == "stream" or cat == "stream":
@@ -1709,11 +1737,12 @@ class DWSIMBridgeV2:
             else:
                 unit_ops.append(o)
         return {
-            "success":  True,
-            "streams":  streams,
-            "unit_ops": unit_ops,
-            "objects":  raw.get("objects", []),
-            "count":    raw.get("count", len(raw.get("objects") or [])),
+            "success":        True,
+            "streams":        streams,
+            "energy_streams": energy_streams,
+            "unit_ops":       unit_ops,
+            "objects":        raw.get("objects", []),
+            "count":          raw.get("count", len(raw.get("objects") or [])),
         }
 
     # ── property reading ──────────────────────────────────────────────────────
@@ -1817,6 +1846,30 @@ class DWSIMBridgeV2:
             )
         # BUG #6: warn if the flowsheet was modified since the last solve.
         return self._stamp_dirty(result)
+
+    def get_stream_properties_safe(self, tag: str, timeout_sec: float = 20.0,
+                                   max_retries: int = 2) -> Dict[str, Any]:
+        """BUG-4: timeout+retry wrapper around get_stream_properties for the
+        user/MCP-facing path (dwsim_get_stream → /stream/properties). A stream
+        read normally takes well under a second; this guards the rare case where
+        a .NET reflection read or console-noise flood blocks, so the request
+        returns an actionable error instead of hanging the MCP transport
+        (~4-min cap). NOT used in the optimizer's hot read loop, to avoid
+        per-call thread overhead."""
+        last = ""
+        for attempt in range(1, max_retries + 1):
+            ok, val, timed_out = _run_with_timeout(
+                lambda: self.get_stream_properties(tag), timeout_sec)
+            if ok and isinstance(val, dict):
+                val["retry_count"] = attempt - 1
+                return val
+            if timed_out:
+                last = f"timeout after {timeout_sec:.0f}s (attempt {attempt}/{max_retries})"
+            else:
+                last = f"{val} (attempt {attempt}/{max_retries})"
+        return {"success": False, "tag": tag,
+                "error": f"get_stream_properties failed: {last}",
+                "retry_count": max_retries, "needs_resolve": True}
 
     def get_object_properties(self, tag: str) -> Dict[str, Any]:
         obj = self._find_object(tag)

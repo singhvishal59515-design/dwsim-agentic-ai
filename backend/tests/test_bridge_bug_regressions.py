@@ -48,8 +48,10 @@ def test_bug1_energy_stream_not_bucketed_as_stream():
     r = _call_list_objects(objects)
     stream_tags = [o["tag"] for o in r["streams"]]
     unitop_tags = [o["tag"] for o in r["unit_ops"]]
+    energy_tags = [o["tag"] for o in r.get("energy_streams", [])]
     assert "Q" not in stream_tags, f"energy stream leaked into streams: {stream_tags}"
-    assert "Q" not in unitop_tags, "energy stream must be skipped, not a unit op"
+    assert "Q" not in unitop_tags, "energy stream must not be a unit op"
+    assert "Q" in energy_tags, "energy stream must be surfaced in energy_streams"
     assert "Feed" in stream_tags
     assert "H-101" in unitop_tags
 
@@ -307,3 +309,37 @@ def test_p6_bridge_stamp_helper_is_safe_without_dirtystate():
     fake = types.SimpleNamespace(_dirty=None)
     out = DWSIMBridgeV2._stamp_dirty(fake, {"success": True})
     assert out == {"success": True}  # no crash, no stamp when disabled
+
+
+# ── BUG-4: get_stream timeout + retry wrapper ────────────────────────────────
+
+def test_bug4_run_with_timeout_fast_and_slow():
+    import time
+    from dwsim_bridge_v2 import _run_with_timeout
+    ok, val, timed_out = _run_with_timeout(lambda: 42, 1.0)
+    assert ok and val == 42 and timed_out is False
+    ok, val, timed_out = _run_with_timeout(lambda: (time.sleep(2), 1)[1], 0.15)
+    assert ok is False and timed_out is True
+
+
+def test_bug4_safe_passthrough_on_success():
+    from dwsim_bridge_v2 import DWSIMBridgeV2
+    fake = types.SimpleNamespace(
+        get_stream_properties=lambda tag: {"success": True,
+                                           "properties": {"tag": tag}})
+    r = DWSIMBridgeV2.get_stream_properties_safe(fake, "Feed")
+    assert r["success"] is True
+    assert r["retry_count"] == 0
+
+
+def test_bug4_safe_times_out_and_flags_needs_resolve():
+    import time
+    from dwsim_bridge_v2 import DWSIMBridgeV2
+    fake = types.SimpleNamespace(
+        get_stream_properties=lambda tag: (time.sleep(1.0), {"success": True})[1])
+    r = DWSIMBridgeV2.get_stream_properties_safe(
+        fake, "Feed", timeout_sec=0.12, max_retries=2)
+    assert r["success"] is False
+    assert r["needs_resolve"] is True
+    assert r["retry_count"] == 2
+    assert "timeout" in r["error"].lower()

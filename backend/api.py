@@ -1041,6 +1041,10 @@ def stream_props(req: StreamPropertyRequest):
     try:
         with _bridge_lock:
             b = _get_bridge()
+            # BUG-4: use the timeout+retry wrapper so a rare blocked read returns
+            # an actionable error instead of hanging the MCP transport.
+            if hasattr(b, "get_stream_properties_safe"):
+                return b.get_stream_properties_safe(req.tag)
             return b.get_stream_properties(req.tag) if hasattr(b,"get_stream_properties") else {"success": False}
     except Exception as exc: return {"success": False, "error": str(exc)}
 
