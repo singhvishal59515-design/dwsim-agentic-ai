@@ -93,3 +93,15 @@ backend/replay_turns/
 # Ablation run artifacts
 ablation_logs/
 backend/ablation_logs/
+backend/ablation_logs_opus/
+backend/ablation_logs*/
+
+# DWSIM auto-backup flowsheets (timestamped, regenerated on every solve)
+backend/*.dwxmz.bak.*
+backend/*.dwxmz.bak*
+
+# Temp / throwaway artifacts (repo hygiene)
+backend/*.tmp
+backend/*.json.tmp
+backend/_diag_*.py
+backend/benchmark_results_run*.json

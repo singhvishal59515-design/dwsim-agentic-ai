@@ -3004,6 +3004,19 @@ class DWSIMAgentV2:
                 allowed = allowed | extra
         return allowed
 
+    # Essential primitives that are always safe to include. When phase
+    # filtering yields a tiny set, we top up with these instead of dumping ALL
+    # ~107 schemas (~21k tokens) — the old `< 5 → return all_tools` path
+    # silently re-bloated every such call. These are the build/solve/inspect
+    # basics the agent needs regardless of phase.
+    _CORE_TOOL_NAMES = frozenset({
+        "new_flowsheet", "build_flowsheet_atomic", "add_object",
+        "connect_streams", "set_stream_property", "set_stream_composition",
+        "set_unit_op_property", "save_and_solve", "run_simulation",
+        "list_simulation_objects", "get_stream_properties", "check_convergence",
+        "load_flowsheet", "find_flowsheets", "search_knowledge",
+    })
+
     def _select_active_tools(self, all_tools: list) -> list:
         """Return only the tools relevant to the current agent phase.
         Falls back to all_tools on any inspection error so behaviour never
@@ -3017,9 +3030,22 @@ class DWSIMAgentV2:
             if not allowed:
                 return all_tools
             filtered = [t for t in all_tools if t.get("name") in allowed]
-            # Safety: if filtering nuked everything (e.g. tool name renamed),
-            # return the full set rather than block the agent.
+            # If phase filtering produced a tiny set, top up with the core
+            # primitives rather than re-sending all ~107 schemas. Only a truly
+            # degenerate result (e.g. every tool renamed) falls back to the full
+            # set, and that is logged loudly so the re-bloat is never silent.
             if len(filtered) < 5:
+                names = set(allowed) | self._CORE_TOOL_NAMES
+                topped = [t for t in all_tools if t.get("name") in names]
+                if len(topped) >= 5:
+                    self._log(f"[ToolSelect] phase={phase} → small set "
+                              f"({len(filtered)}), topped up to {len(topped)} "
+                              f"with core primitives")
+                    return topped
+                _log.warning("[ToolSelect] phase=%s produced only %d tools even "
+                             "with core top-up — sending all %d schemas (~21k "
+                             "tokens); check tool-name drift.",
+                             phase, len(topped), len(all_tools))
                 return all_tools
             self._log(f"[ToolSelect] phase={phase} → {len(filtered)}/{len(all_tools)} tools active")
             return filtered
