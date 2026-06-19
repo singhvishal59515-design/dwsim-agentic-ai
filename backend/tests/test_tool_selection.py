@@ -80,3 +80,40 @@ def test_plain_analysis_is_smaller_than_optimisation():
     plain = Ag._active_tool_names("analyze", "report the results")
     opt   = Ag._active_tool_names("analyze", "optimize the process")
     assert len(plain) < len(opt), "gating must actually shrink the plain payload"
+
+
+def test_tiny_phase_tops_up_with_core_not_all_107():
+    # Regression: the old `<5 → return all_tools` path silently re-sent ALL
+    # ~107 schemas (~21k tokens). A tiny phase set must now be topped up with
+    # the core primitives, not the full catalogue.
+    import types
+    from tools_schema_v2 import DWSIM_TOOLS
+    fake = types.SimpleNamespace(
+        _CORE_TOOL_NAMES=Ag._CORE_TOOL_NAMES,
+        _turn_user_message="",
+        _detect_phase=lambda: "build",
+        _active_tool_names=lambda phase, msg: {"add_object"},  # tiny
+        _log=lambda *a, **k: None,
+    )
+    out = Ag._select_active_tools(fake, list(DWSIM_TOOLS))
+    names = {t["name"] for t in out}
+    assert len(out) < len(DWSIM_TOOLS), "must not re-send the full catalogue"
+    assert len(out) >= 5
+    assert "save_and_solve" in names and "list_simulation_objects" in names  # core present
+    assert "add_object" in names                                  # phase pick kept
+
+
+def test_normal_phase_returns_filtered_not_all():
+    import types
+    from tools_schema_v2 import DWSIM_TOOLS
+    big = {t["name"] for t in DWSIM_TOOLS
+           if t["name"] not in {"bayesian_optimize", "monte_carlo_study"}}
+    fake = types.SimpleNamespace(
+        _CORE_TOOL_NAMES=Ag._CORE_TOOL_NAMES,
+        _turn_user_message="",
+        _detect_phase=lambda: "analyze",
+        _active_tool_names=lambda phase, msg: big,
+        _log=lambda *a, **k: None,
+    )
+    out = Ag._select_active_tools(fake, list(DWSIM_TOOLS))
+    assert len(out) == len(big) < len(DWSIM_TOOLS)
