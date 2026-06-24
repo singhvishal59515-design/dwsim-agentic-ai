@@ -762,7 +762,30 @@ def run_task(task_id: str, agent: Any) -> Dict[str, Any]:
         })
 
     passed = outcome == "SUCCESS"
-    convergence = True if (isinstance(stream_results, dict) and stream_results) else None
+    # Record the REAL per-task solver-convergence flag, not merely "stream
+    # results exist". A task that never executed (no tool calls — e.g. the
+    # provider rate-limited it) is recorded as None (not-run) and NEVER True, so
+    # the field is a trustworthy metric (the old `True if stream_results` default
+    # read True even for tasks that never ran, which cannot support a "100%
+    # convergence" claim). When the task ran, query the live convergence check.
+    convergence: Optional[bool] = None
+    if tool_calls:
+        convergence = bool(isinstance(stream_results, dict) and stream_results)
+        bridge = getattr(agent, "bridge", None)
+        for meth in ("check_convergence", "convergence_check"):
+            fn = getattr(bridge, meth, None) if bridge is not None else None
+            if callable(fn):
+                try:
+                    cc = fn()
+                    if isinstance(cc, dict) and cc.get("success", True):
+                        ac = cc.get("all_converged")
+                        if ac is None:
+                            ac = (cc.get("convergence_check") or {}).get("all_converged")
+                        if ac is not None:
+                            convergence = bool(ac)
+                            break
+                except Exception:
+                    pass
     speedup = (round(task.human_time_min * 60.0 / elapsed, 1)
                if task.human_time_min and elapsed > 0 else None)
 
