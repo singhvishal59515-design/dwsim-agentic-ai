@@ -13,6 +13,7 @@ without a higher-throughput tier — they need data collection, not more code.
 |---|---|---|---|
 | 2d | Model-form uncertainty: show how package choice shifts a real result | **DONE (live)** | §2 below; `MULTIMODEL_NONIDEAL_VALIDATION.md` |
 | 3a | Failure-modes & recovery table | **DONE** | §3 below |
+| 3 (EO) | Quantify surrogate-EO approximation quality (CV R², prediction error at optimum) | **DONE (live)** | `EO_QUALITY_VALIDATION.md` — cross-val R²=1.0, prediction error 0.24% at the reported heater optimum; trust flag's low-R² discrimination covered analytically (Rosenbrock) |
 | 6c | Threats-to-validity table (result → evidence → gap) | **DONE** | §4 below |
 | 5c | Computational requirements (tokens/turn, tier, hardware) | **DONE** | §5 below |
 | 5d | Reproducibility incl. mock-mode (no paid LLM key) | **DONE** | §5 below |
