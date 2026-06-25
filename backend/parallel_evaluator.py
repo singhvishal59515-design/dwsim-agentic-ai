@@ -105,6 +105,83 @@ def parallel_map(factory: Callable[..., Callable], factory_args: tuple,
         return pool.map(X)
 
 
+# ── Persistent-pool population optimizer (#2: amortise CLR init) ─────────────
+
+def run_parallel_de(factory: Callable[..., Callable], factory_args: tuple,
+                    bounds: Sequence[Tuple[float, float]], *,
+                    popsize: int = 0, generations: int = 20, n_workers: int = 4,
+                    seed: int = 42, minimize: bool = True, F: float = 0.7,
+                    CR: float = 0.9) -> Dict[str, Any]:
+    """Differential evolution whose every generation's whole population is
+    evaluated through a SINGLE PERSISTENT worker pool.
+
+    This is the piece that turns the worker pool from a net loss into a win for
+    population optimisers: the pool — and its ~30 s/worker DWSIM CLR
+    initialisation — is created ONCE (the `with` block) and reused across all
+    `generations`, so the init is amortised over generations * popsize solves
+    instead of being paid per batch. A one-shot `parallel_map` per generation
+    would re-pay it every generation; this does not.
+
+    `factory(*factory_args) -> evaluate(x) -> {"objective": float|None, ...}`
+    (the same picklable factory the pool uses, e.g. `make_dwsim_evaluator`).
+    Falls back to serial inside the pool on worker failure. Returns
+    {success, x, objective, generations, popsize, n_workers, evaluations}.
+    """
+    import random
+    rng = random.Random(seed)
+    d = len(bounds)
+    lo = [float(b[0]) for b in bounds]
+    hi = [float(b[1]) for b in bounds]
+    popsize = int(popsize) if popsize and popsize > 0 else max(8, 5 * d)
+    sign = 1.0 if minimize else -1.0
+    _PEN = 1e18
+
+    def _clamp(v):
+        return [min(hi[k], max(lo[k], v[k])) for k in range(d)]
+
+    pop = [[rng.uniform(lo[i], hi[i]) for i in range(d)] for _ in range(popsize)]
+
+    with ProcessPoolEvaluator(factory, factory_args, n_workers) as pool:
+        def fit(X: List[List[float]]) -> List[float]:
+            out = []
+            for r in pool.map(X):
+                o = r.get("objective") if isinstance(r, dict) else None
+                out.append(sign * float(o) if o is not None else _PEN)
+            return out
+
+        fpop = fit(pop)
+        for _g in range(generations):
+            trials = []
+            for i in range(popsize):
+                a, b, c = rng.sample([j for j in range(popsize) if j != i], 3)
+                jr = rng.randrange(d)
+                trial = [(pop[a][k] + F * (pop[b][k] - pop[c][k]))
+                         if (rng.random() < CR or k == jr) else pop[i][k]
+                         for k in range(d)]
+                trials.append(_clamp(trial))
+            ftr = fit(trials)                      # whole generation, one pool.map
+            for i in range(popsize):
+                if ftr[i] <= fpop[i]:
+                    pop[i], fpop[i] = trials[i], ftr[i]
+
+    best = min(range(popsize), key=lambda i: fpop[i])
+    return {"success": True, "x": pop[best], "objective": sign * fpop[best],
+            "generations": generations, "popsize": popsize,
+            "n_workers": n_workers, "evaluations": popsize * (generations + 1)}
+
+
+def make_init_cost_evaluator(init_s: float = 0.5, eval_s: float = 0.02):
+    """Mock factory that SLEEPS `init_s` when constructed (stands in for the
+    ~30 s per-worker DWSIM CLR init) and `eval_s` per evaluation. Used to
+    demonstrate that a persistent pool pays the init once, not per batch."""
+    time.sleep(init_s)                      # paid once per worker, in the initializer
+
+    def evaluate(x: Sequence[float]) -> Dict[str, Any]:
+        time.sleep(eval_s)
+        return {"objective": float(sum(xi * xi for xi in x)), "constraint_values": []}
+    return evaluate
+
+
 # ── DWSIM specialisation ─────────────────────────────────────────────────────
 
 def make_dwsim_evaluator(flowsheet_path: str,
