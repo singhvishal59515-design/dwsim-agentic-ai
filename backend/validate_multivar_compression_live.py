@@ -25,9 +25,14 @@ from typing import Any, Dict, List
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-P0, PF, N = 1.0, 32.0, 5
-RATIO = (PF / P0) ** (1.0 / N)                 # = 2.0
-ANALYTIC = [round(P0 * RATIO ** k, 4) for k in range(1, N)]   # [2, 4, 8, 16]
+# Parameterisable: defaults give the 4-DOF case (5 stages, 1->32 bar). Set
+# DWSIM_MV_N / DWSIM_MV_PF to scale the number of decision variables, e.g.
+# N=6, PF=64 -> 5 DOF with optimum [2,4,8,16,32].
+P0 = float(os.environ.get("DWSIM_MV_P0", "1"))
+PF = float(os.environ.get("DWSIM_MV_PF", "32"))
+N  = int(os.environ.get("DWSIM_MV_N", "5"))
+RATIO = (PF / P0) ** (1.0 / N)                 # equal-ratio optimum
+ANALYTIC = [round(P0 * RATIO ** k, 4) for k in range(1, N)]   # geometric progression
 
 _objs = [{"tag": "Feed", "type": "MaterialStream"}]
 _conns = []
@@ -51,8 +56,10 @@ for i in range(1, N + 1):
         _prev = midc
     else:
         _prev = mid
-# fixed final stage outlet; intermediate pressures are decision variables (init = geometric guess slightly off)
-_init_P = [3.0, 6.0, 11.0, 18.0]
+# fixed final stage outlet; intermediate pressures are decision variables.
+# Initial guess ~30% above the optimum (deliberately off); bounds bracket it.
+_init_P = [round(a * 1.3, 3) for a in ANALYTIC]
+_bounds = [(round(max(P0 * 1.1, a * 0.55), 3), round(a * 1.75, 3)) for a in ANALYTIC]
 for i in range(1, N):
     _uo += [{"tag": f"C{i}", "property_name": "outlet_pressure", "value": _init_P[i-1], "unit": "bar"}]
 _uo += [{"tag": f"C{N}", "property_name": "outlet_pressure", "value": PF, "unit": "bar"}]
@@ -69,8 +76,8 @@ SPEC = {
 }
 
 VARS = [{"tag": f"C{i}", "property": "outlet_pressure", "unit": "bar",
-         "lower": lo, "upper": hi, "initial": _init_P[i-1]}
-        for i, (lo, hi) in enumerate([(1.5, 6), (3, 12), (6, 22), (10, 30)], start=1)]
+         "lower": _bounds[i-1][0], "upper": _bounds[i-1][1], "initial": _init_P[i-1]}
+        for i in range(1, N)]
 OBJ = {"type": "expression",
        "expression": "+".join(f"abs(P{i})" for i in range(1, N + 1)),
        "named_values": [{"name": f"P{i}", "tag": f"C{i}", "property": "DeltaQ"}
@@ -134,13 +141,13 @@ def main() -> int:
           f"| power {p_opt:.3f} kW | per-var match {per_var_ok} | power_ok {power_ok}",
           flush=True)
 
-    L = ["# Multi-Variable Live Optimization — Five-Stage Compression (live DWSIM)", "",
-         "A genuine **4-decision-variable** optimisation on a real DWSIM flowsheet "
-         "(5 compressors + 4 intercoolers), validated against a known "
-         "multi-dimensional optimum. This moves the validated live ceiling above "
-         "the single-variable heater/2-stage cases. No LLM.", "",
+    L = [f"# Multi-Variable Live Optimization — {N}-Stage Compression (live DWSIM)", "",
+         f"A genuine **{N-1}-decision-variable** optimisation on a real DWSIM "
+         f"flowsheet ({N} compressors + {N-1} intercoolers), validated against a "
+         f"known multi-dimensional optimum. This moves the validated live ceiling "
+         f"above the single-variable heater/2-stage cases. No LLM.", "",
          f"**Problem:** compress nitrogen {P0:.0f} → {PF:.0f} bar in {N} stages, "
-         f"intercooling to 25 °C; minimise total compressor power over the four "
+         f"intercooling to 25 °C; minimise total compressor power over the {N-1} "
          f"intermediate pressures.",
          f"**Closed-form optimum:** equal stage ratios r = (Pf/P0)^(1/{N}) = "
          f"{RATIO:.3f} ⇒ **{ANALYTIC} bar**.", "",
@@ -157,14 +164,15 @@ def main() -> int:
           f"| at optimizer optimum | {p_opt:.3f} |", "",
           f"**Result:** {'✅ ' if allok else ''}the optimizer recovers the "
           f"equal-ratio geometric-progression optimum of a real {N}-stage DWSIM "
-          f"flowsheet across **four** simultaneous decision variables "
+          f"flowsheet across **{N-1}** simultaneous decision variables "
           f"({'all within tolerance' if per_var_ok else 'see table'}; total power "
           f"{'at or below' if power_ok else 'vs'} the analytic optimum). This "
           f"demonstrates multi-variable live optimisation, not just the "
           f"single-variable cases.",
-          "", "_Scope: 4 continuous decision variables on a real flowsheet with a "
-          "known closed-form optimum; still well below industrial DOF counts "
-          "(see the paper's scaling discussion), but a concrete step above 1-D._"]
+          "", f"_Scope: {N-1} continuous decision variables on a real flowsheet "
+          "with a known closed-form optimum; still well below industrial DOF "
+          "counts (see the paper's scaling discussion), but a concrete step above "
+          "1-D._"]
     md = "\n".join(L) + "\n"
     with open(os.path.join(_HERE, "MULTIVAR_OPTIMIZATION_VALIDATION.md"), "w",
               encoding="utf-8") as f:
