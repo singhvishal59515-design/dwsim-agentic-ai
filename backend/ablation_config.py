@@ -102,6 +102,18 @@ class _Ablation:
     def disable_tools(self) -> bool:
         return self.direct_llm
 
+    #   "no_cot"     — chain-of-thought reasoning guidance removed from the
+    #                  system prompt (Tian et al. Table 4, "w/o CoT")
+    #   "no_fewshot" — few-shot worked examples removed from the system prompt
+    #                  (Tian et al. Table 4, "w/o Few-Shot")
+    @property
+    def disable_cot(self) -> bool:
+        return self.condition == "no_cot"
+
+    @property
+    def disable_fewshot(self) -> bool:
+        return self.condition == "no_fewshot"
+
     # ── replay-log tagging ───────────────────────────────────────────────────
     def tags(self) -> Dict[str, Any]:
         return {"condition": self.condition,

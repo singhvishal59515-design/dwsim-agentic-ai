@@ -197,6 +197,13 @@ def to_markdown() -> str:
           "is qualitative (avoiding unsafe/unsupported answers) rather than "
           "pass-rate-changing here. This mirrors Tian et al.'s finding that "
           "removing E-MCTS and the Task-Understanding agent each degrade the run.")
+        w("")
+        w("Two further in-context-learning conditions are wired (Tian et al. "
+          "Table 4): **no_cot** strips the chain-of-thought reasoning block and "
+          "**no_fewshot** strips the worked examples from the system prompt "
+          "(toggled by `DWSIM_ABLATION_CONDITION`; verified to remove exactly "
+          "those sections). Their pass-rate deltas are throughput-gated like the "
+          "rest of the agent ablation.")
     else:
         w("_ablation_results.json not present in this checkout._")
     w("")

@@ -17,6 +17,8 @@ Conditions (codes match the analysis script):
   B = No-RAG               (... = no_rag)
   C = No-SafetyValidator   (... = no_safety)
   D = Direct LLM           (... = direct_llm — no tools)
+  E = No-CoT               (... = no_cot — reasoning guidance removed; Tian Table 4)
+  F = No-Few-Shot          (... = no_fewshot — worked examples removed; Tian Table 4)
 
 Per-task JSONL record:
   {condition, task_id, category, complexity, rep, success(1/0/-1),
@@ -46,9 +48,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-CONDITION_MAP = {"A": "full", "B": "no_rag", "C": "no_safety", "D": "direct_llm"}
+CONDITION_MAP = {"A": "full", "B": "no_rag", "C": "no_safety", "D": "direct_llm",
+                 "E": "no_cot", "F": "no_fewshot"}
 CONDITION_NAMES = {"A": "Full System", "B": "No-RAG",
-                   "C": "No-SafetyValidator", "D": "Direct LLM"}
+                   "C": "No-SafetyValidator", "D": "Direct LLM",
+                   "E": "No-CoT", "F": "No-Few-Shot"}
 DEFAULT_LOG_DIR = os.path.join(_HERE, "ablation_logs")
 
 

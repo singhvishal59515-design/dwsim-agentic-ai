@@ -33,6 +33,8 @@ Each condition removes one capability from the full system and re-runs the a-pri
 
 **Reading.** Removing all tools collapses the pass-rate to 0% and removing the reflection tools drops it to 50%, while removing retrieval grounding or the safety validator leaves it unchanged on this task set — evidence that the tool-calling action space and the reflection tools are load-bearing, while grounding and safety act as guardrails whose value is qualitative (avoiding unsafe/unsupported answers) rather than pass-rate-changing here. This mirrors Tian et al.'s finding that removing E-MCTS and the Task-Understanding agent each degrade the run.
 
+Two further in-context-learning conditions are wired (Tian et al. Table 4): **no_cot** strips the chain-of-thought reasoning block and **no_fewshot** strips the worked examples from the system prompt (toggled by `DWSIM_ABLATION_CONDITION`; verified to remove exactly those sections). Their pass-rate deltas are throughput-gated like the rest of the agent ablation.
+
 ## C. End-to-end benchmark and per-task error analysis
 
 The a-priori 25-task benchmark ran against the live engine. Strict pass rate **24.0%** (6/25); excluding the **6** tasks that never executed (0 tool calls — provider rate-limited, inconclusive rather than failed), the executed pass rate is **31.6%** (6/19).
