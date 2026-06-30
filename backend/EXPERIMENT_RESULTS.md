@@ -53,5 +53,9 @@ Designs are scored on five weighted dimensions — economic 0.35, environmental 
 
 **Cross-check.** Reproducing Tian et al.'s Table-1 arithmetic — uniform dimensions of 73 with an SCR of 23.4% and λ = 0.3 — yields an overall score of 33.9/100, matching their reported ≈34 for the GPT-4o row, which confirms the rubric implementation. Scoring the live agent's designs on all five dimensions across every condition (their Table 1) is the one piece that needs live throughput.
 
+## E. Multi-method baseline comparison
+
+A Tian-Table-1-style comparison of the full agentic system against a direct LLM with no tools (the project's measured end-to-end-LLM equivalent): 68% vs 0% pass rate — the capability comes from the tool-calling + convergence loop, not the bare model. External multi-agent frameworks (Swarm, AutoGen, CrewAI, MetaGPT) and the expert-manual baseline are listed honestly as not evaluated, each with its reason; the harness scores any method callable on the shared task set, so those rows populate without new code when quota is available. Full table in BASELINE_COMPARISON.md.
+
 ---
-_Related artifacts: BENCHMARK_ERROR_ANALYSIS.md, DESIGN_SEARCH_VALIDATION.md, DISTILLATION_TAC_CASE_STUDY.md, ABLATION_PROTOCOL.md._
+_Related artifacts: BASELINE_COMPARISON.md, BENCHMARK_ERROR_ANALYSIS.md, DESIGN_SEARCH_VALIDATION.md, DISTILLATION_TAC_CASE_STUDY.md, ABLATION_PROTOCOL.md._
