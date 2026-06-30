@@ -6295,6 +6295,23 @@ class DWSIMBridgeV2:
             result = self.save_and_solve()
             result["build_log"]    = build_log
             result["build_errors"] = build_errors
+            # ── Pre-design thermodynamic gate (Stage-1 analysis; advisory only,
+            # never blocks the build) — flags a property-package that is wrong for
+            # the chemistry (e.g. a cubic EOS on a polar azeotropic mixture). ──
+            try:
+                from thermo_preflight import preflight_thermo
+                _P, _T = 1.01325, 25.0
+                if feed_specs:
+                    _fs = feed_specs[0]
+                    if _fs.get("pressure") is not None and str(
+                            _fs.get("pressure_unit", "")).lower() in ("bar", "bara"):
+                        _P = float(_fs["pressure"])
+                    if _fs.get("temperature") is not None and str(
+                            _fs.get("temperature_unit", "")).lower() in ("c", "°c", "degc"):
+                        _T = float(_fs["temperature"])
+                result["thermo_preflight"] = preflight_thermo(compounds, pp, _P, _T)
+            except Exception:
+                pass
             if build_errors:
                 result.setdefault("warnings", [])
                 result["warnings"].append(
