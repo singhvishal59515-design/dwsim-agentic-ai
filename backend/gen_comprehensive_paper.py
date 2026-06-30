@@ -26,6 +26,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ARCH = os.path.join(_HERE, "architecture.png")
+FIG = {n: os.path.join(_HERE, f"figure{n}.png") for n in (2, 3, 4, 5, 6)}
 
 
 def H(doc, text, level=1):
@@ -62,8 +63,11 @@ def NUM(doc, items):
             para.add_run(it)
 
 
-def FIGCAP(doc, text, placeholder=None):
-    if placeholder:
+def FIGCAP(doc, text, placeholder=None, img=None, width=6.0):
+    if img and os.path.exists(img):
+        doc.add_picture(img, width=Inches(width))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    elif placeholder:
         ph = doc.add_paragraph(); r = ph.add_run("[" + placeholder + "]")
         r.italic = True; r.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -82,8 +86,17 @@ def TABLE(doc, headers, rows, caption=None):
 
 
 def build() -> str:
+    # Regenerate Figures 2-6 from the real validation data if any are missing,
+    # so the document is self-contained and reproducible.
+    if not all(os.path.exists(p) for p in FIG.values()):
+        try:
+            import gen_paper_figures
+            gen_paper_figures.main()
+        except Exception as e:
+            print("[paper] WARN: could not generate figures:", e)
+
     doc = Document()
-    base = doc.styles["Normal"]; base.font.name = "Times New Roman"; base.font.size = Pt(11)
+    norm = doc.styles["Normal"]; norm.font.name = "Times New Roman"; norm.font.size = Pt(11)
 
     # ── Title block ──────────────────────────────────────────────────────────
     P(doc, "ORIGINAL RESEARCH ARTICLE", bold=True, align="center", size=10)
@@ -392,7 +405,8 @@ def build() -> str:
            "(init + thermo PP → add objects → connect ports → set feed T,P,flow → "
            "set composition → set unit-op CalcMode → solve + read-back) and the "
            "robustness checks applied at each step.",
-           placeholder="Figure 2 — paste construction-protocol diagram from master")
+           placeholder="Figure 2 — paste construction-protocol diagram from master",
+           img=FIG[2], width=6.3)
 
     # ── 5. Optimisation layer ────────────────────────────────────────────────
     H(doc, "5. Optimisation and Analysis Layer")
@@ -514,7 +528,8 @@ def build() -> str:
     FIGCAP(doc, "Figure 3. Solver correctness on analytic benchmarks: (a) best-of-suite "
            "distance to the known optimum on five functions; (b) NSGA-II versus the "
            "analytic Pareto front; (c) recovered versus reference Sobol indices.",
-           placeholder="Figure 3 — paste solver-correctness panel from master")
+           placeholder="Figure 3 — paste solver-correctness panel from master",
+           img=FIG[3], width=6.5)
     TABLE(doc, ["Variable", "S1 (computed)", "S1 (analytic)", "ST (computed)",
                 "ST (analytic)", "ST error"],
           [["X1", "0.316", "0.314", "0.558", "0.558", "5.0×10⁻⁴"],
@@ -547,7 +562,8 @@ def build() -> str:
     FIGCAP(doc, "Figure 4. Live-DWSIM validation: (a) closed loop reaches both duty "
            "bounds and reproduces on re-solve; (b) infeasible-path vs feasible-path "
            "passes; (c) total-annualised-cost decomposition.",
-           placeholder="Figure 4 — paste live-DWSIM validation panel from master")
+           placeholder="Figure 4 — paste live-DWSIM validation panel from master",
+           img=FIG[4], width=6.5)
     H(doc, "7.4 Dual-path accuracy: zero hallucination", 2)
     P(doc, "The dual-path audit shows the agent reports solver values with no "
       "meaningful loss of precision (Table 4). Pressure, mass flow and vapour "
@@ -596,7 +612,8 @@ def build() -> str:
     FIGCAP(doc, "Figure 5. (a) Live 25-task benchmark pass rates by complexity and "
            "overall (strict and executed-task bases); (b) dual-path accuracy "
            "confirming zero hallucination.",
-           placeholder="Figure 5 — paste benchmark + dual-path panel from master")
+           placeholder="Figure 5 — paste benchmark + dual-path panel from master",
+           img=FIG[5], width=6.0)
     H(doc, "7.6 Capstone case study: an interior optimum with a known closed form", 2)
     P(doc, "The strongest single optimisation result drives the live engine to an "
       "interior optimum whose answer is known in closed form. In a two-stage "
@@ -618,7 +635,8 @@ def build() -> str:
     FIGCAP(doc, "Figure 6. Live-DWSIM capstone: the optimiser reaches the textbook "
            "interior optimum, confirmed by the analytical geometric-mean closed form "
            "and a parametric power sweep.",
-           placeholder="Figure 6 — paste capstone power-sweep plot from master")
+           placeholder="Figure 6 — paste capstone power-sweep plot from master",
+           img=FIG[6], width=4.6)
     H(doc, "7.7 Multi-variable live optimisation", 2)
     P(doc, "To move the validated live ceiling above a single decision variable, an "
       "N-stage compression train with intercooling is optimised over its "
@@ -916,11 +934,21 @@ def build() -> str:
       "benchmark artifacts referenced in Section 7 are regenerated by their "
       "corresponding scripts.")
 
-    out = os.path.join(_HERE, "DWSIM_Agentic_AI_comprehensive.docx")
-    doc.save(out)
+    base = "DWSIM_Agentic_AI_comprehensive.docx"
+    out = os.path.join(_HERE, base)
+    try:
+        doc.save(out)
+    except PermissionError:
+        # The target is open (locked) in Word — write a suffixed copy instead of
+        # silently failing, and report it.
+        base = "DWSIM_Agentic_AI_comprehensive_FIGURES.docx"
+        out = os.path.join(_HERE, base)
+        doc.save(out)
+        print("[paper] NOTE: the canonical .docx was locked (open in Word); "
+              "wrote", base, "instead — close Word and re-run for the canonical name.")
     for d in (os.path.join(os.path.expanduser("~"), "Downloads"),
               os.path.join(os.path.expanduser("~"), "Desktop")):
-        try: shutil.copyfile(out, os.path.join(d, "DWSIM_Agentic_AI_comprehensive.docx"))
+        try: shutil.copyfile(out, os.path.join(d, base))
         except Exception: pass
     print("[paper] wrote", out)
     return out
