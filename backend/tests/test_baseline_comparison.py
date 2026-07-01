@@ -12,20 +12,20 @@ if _B not in sys.path:
     sys.path.insert(0, _B)
 
 
-def test_from_ablation_extracts_full_and_direct_llm():
-    from baseline_comparison import from_ablation_results
-    rows = from_ablation_results()
-    if not rows:
-        return  # artifact absent in this checkout
+def test_real_rows_use_live_benchmark_not_the_smoke_run():
+    from baseline_comparison import real_method_rows
+    rows = real_method_rows()
     names = {r.name for r in rows}
     assert any("Full agentic system" in n for n in names)
     assert any("Direct LLM" in n for n in names)
     full = next(r for r in rows if "Full agentic" in r.name)
     direct = next(r for r in rows if "Direct LLM" in r.name)
-    assert full.pass_rate_pct == 68.0
+    # the full-system row must be the REAL live-benchmark rate (24), never the
+    # smoke-run ablation figure (68)
+    assert full.pass_rate_pct != 68.0
+    assert full.source == "measured"
     assert direct.pass_rate_pct == 0.0
-    # the smoke-run sub-second time must NOT be surfaced as a real timing
-    assert full.mean_time_s is None
+    assert direct.source == "structural"
 
 
 def test_external_placeholders_are_marked_not_evaluated():

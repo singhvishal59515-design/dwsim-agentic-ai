@@ -162,7 +162,11 @@ def build() -> str:
       "Aspen's DSTWU shortcut — a direct method-level Aspen comparison on one "
       "problem — and an Enhanced-MCTS design-space search rescues high-potential "
       "non-converged configurations to recover a known optimum a greedy search "
-      "misses. On "
+      "misses. A deterministic pre-design thermodynamic gate catches a wrong "
+      "property-package start — a cubic equation of state on a polar azeotropic "
+      "mixture — before it corrupts a build, and an engine-validated benchmark "
+      "generator scales the task set from real archetypes with ground truth read "
+      "from the solver rather than fabricated. On "
       "an a-priori 25-task benchmark executed against the live engine the agent "
       "attains a 24% strict pass rate (32% over the 19 tasks that executed; the "
       "remaining six never ran due to LLM rate-limiting and are reported as "
@@ -176,9 +180,11 @@ def build() -> str:
       "rather than replacing the simulator. The defensible thesis is therefore "
       "“Aspen-level optimisation methodology over an open simulator,” delivered "
       "through a natural-language interface that no commercial tool currently offers. "
-      "The complete system (564 component tests), a content-hashed 25-task "
-      "benchmark, append-only agent transcripts, and a fully-wired four-condition "
-      "ablation harness are released for reproducibility.")
+      "The complete system (630 component tests), a content-hashed 25-task "
+      "benchmark plus an engine-validated task generator, append-only agent "
+      "transcripts, a multi-method baseline comparison, and a fully-wired "
+      "six-condition ablation harness (retrieval, safety, tools, reflection, "
+      "chain-of-thought and few-shot) are released for reproducibility.")
     P(doc, "Keywords: Large Language Models; Agentic AI; Tool calling; DWSIM; Process "
            "simulation; Flowsheet optimisation; Infeasible-path optimisation; "
            "Equation-oriented optimisation; NSGA-II; Global sensitivity analysis; "
@@ -237,8 +243,16 @@ def build() -> str:
         "closed-form answer three independent ways; multi-variable (four- and "
         "five-dimensional) live optima; a surrogate-EO approximation-quality audit; "
         "a non-ideal model-form-uncertainty case; a dual-path zero-hallucination "
-        "accuracy audit; a pre-registered component-attribution ablation; and an "
-        "a-priori 25-task agent benchmark reported with its limitations.",
+        "accuracy audit; a pre-registered component-attribution ablation extended "
+        "with in-context-learning conditions (chain-of-thought, few-shot); a "
+        "multi-method baseline comparison isolating the tool-using loop; a "
+        "deterministic pre-design thermodynamic gate; and an a-priori 25-task agent "
+        "benchmark, augmented by an engine-validated task generator, reported with "
+        "its limitations.",
+        "A structural design-space search — an Enhanced Monte-Carlo Tree Search over "
+        "complete configurations with a dual-layer value that rescues "
+        "high-potential non-converged designs, scored by a deterministic "
+        "five-dimension design rubric, complementing the parametric optimisers.",
         "A capability matrix versus Aspen Plus — an operationalised, feature-by-feature "
         "comparison stating explicitly where the open platform matches, exceeds, or "
         "remains fundamentally behind the commercial tool.",
@@ -313,7 +327,7 @@ def build() -> str:
       "layer, a service layer, the agentic reasoning layer, the DWSIM bridge, and "
       "the simulation/numerics engine layer. The design separates conversational "
       "orchestration from numerical execution so that each can be tested and "
-      "replaced independently; the backend test suite reports 564 passing and 1 "
+      "replaced independently; the backend test suite reports 630 passing and 1 "
       "skipped tests at the time of writing (the skips require a live DWSIM and "
       "self-skip).")
     if os.path.exists(ARCH):
@@ -474,6 +488,20 @@ def build() -> str:
       "same flowsheet under several property packages and reports the per-output "
       "spread—turning the fidelity question into a measured number rather than an "
       "assumption.")
+    H(doc, "5.4 Pre-design thermodynamic gate", 2)
+    P(doc, "A recurring, silent failure of automated flowsheet design is starting "
+      "from a property package that is wrong for the chemistry — most classically a "
+      "cubic equation of state on a polar, low-pressure mixture that forms an "
+      "azeotrope, where the equation of state mis-predicts the vapour-liquid "
+      "equilibrium and every downstream result is quietly corrupted. A deterministic "
+      "pre-design gate runs before each atomic build: it classifies the compound "
+      "system and conditions, compares the requested package's thermodynamic family "
+      "against the family the chemistry requires, flags the mismatch, and recommends "
+      "the theory-appropriate fix plus a binary T-x-y check. The gate is pure "
+      "(a function of compounds, requested package and feed conditions), advisory "
+      "(it annotates the build result rather than blocking it), and reuses the "
+      "same thermodynamic-intelligence registry as the model-form uncertainty "
+      "analysis, so selection and gate never disagree.")
 
     # ── 6. Evaluation methodology ────────────────────────────────────────────
     H(doc, "6. Evaluation Methodology")
@@ -508,9 +536,28 @@ def build() -> str:
       "FAILURE_SILENT (converged but physically wrong—the most dangerous). Each run "
       "is additionally scored by an independent LLM-as-judge, and the suite runs "
       "one OS subprocess per task so a single CLR crash cannot void the run. The "
-      "four-condition ablation (Section 7.10) shares this task set under a provider "
+      "component-attribution ablation (Section 7.10) shares this task set under a provider "
       "lock and temperature 0, analysed with a pre-registered non-parametric "
       "pipeline (Kruskal–Wallis → Mann–Whitney U with Holm → Cohen's d).")
+    H(doc, "6.4 Scaling the benchmark by engine-validated generation", 2)
+    P(doc, "A 25-task set is small relative to a large expert-authored corpus, but "
+      "hand-authoring — or worse, fabricating — thousands of tasks is neither "
+      "scalable nor honest. Instead, an engine-validated generator enumerates "
+      "candidate tasks from real process archetypes (heater, cooler, pump, "
+      "compressor, valve, …) crossed with compound systems, operating conditions, "
+      "complexity, and two detail levels (fully specified vs deliberately "
+      "ambiguous). Every candidate is built and solved on the live DWSIM engine; a "
+      "candidate is kept only if it converges AND the reference solve actually "
+      "achieves the setpoint the prompt states (an intent-consistency check that "
+      "drops any archetype whose specification did not take effect), and its "
+      "success criteria are then read from that solve — never invented. The result "
+      "is therefore honestly labelled programmatically generated and "
+      "engine-validated, not expert-designed: from 176 candidates the live pipeline "
+      "validated 50 tasks across four archetypes (dropping 13 that did not achieve "
+      "intent) and content-hashes the set for immutability. Crucially, generating "
+      "and validating the dataset needs the engine but no LLM quota; only running "
+      "the agent across the tasks does — the same constraint that bounds the "
+      "headline benchmark number.")
 
     # ── 7. Results ───────────────────────────────────────────────────────────
     H(doc, "7. Results")
@@ -678,28 +725,30 @@ def build() -> str:
       "leaves implicit.")
     H(doc, "7.10 Component-attribution ablation", 2)
     P(doc, "A pre-registered component-attribution ablation compares the full system "
-      "against four knockout conditions; the same a-priori task set is run under "
-      "each and analysed with the non-parametric pipeline of Section 6.3. The "
-      "measured pass rates (Table 7) show the dominant effect: removing all tools "
-      "collapses the pass rate to 0%, and removing the reflection/diagnostic tools "
-      "lowers it to 50%, whereas removing retrieval grounding or the safety "
-      "validator leaves the pass rate unchanged on this task set—evidence that the "
-      "tool-calling action space and the reflection tools are load-bearing, while "
-      "grounding and safety act as guardrails whose effect is qualitative "
-      "(avoiding unsafe or unsupported answers) rather than pass-rate-changing "
-      "here. Exact p-values and effect sizes require the full set of repeated runs "
-      "and are throughput-gated by LLM rate limits; the statistical machinery is "
-      "wired and verified, and the deltas below are the interim, directional "
-      "result.")
-    TABLE(doc, ["Condition", "Removed component", "Pass rate", "Passed / run"],
+      "against four knockout conditions with the non-parametric pipeline of "
+      "Section 6.3 (Kruskal–Wallis → Mann–Whitney U + Holm → Cohen's d). We are "
+      "explicit about status. The ablation harness is wired and verified "
+      "end-to-end without quota — a mock-agent round-trip plus a live smoke run — "
+      "but the full ablation across every condition with the real LLM has NOT yet "
+      "been run; it is throughput-gated. The per-condition figures produced by that "
+      "fast harness verification (Table 7) are therefore a PIPELINE CHECK, not "
+      "measured live-agent performance: their sub-second per-task times show that "
+      "no LLM or solver executed, and they are inconsistent with the real "
+      "full-system live benchmark of 24% strict (Section 7.5). We report them only "
+      "to evidence that the harness runs end-to-end and yields deltas in the "
+      "expected direction (removing all tools collapses the run). The trustworthy "
+      "component-attribution numbers, with exact p-values and effect sizes, await a "
+      "full-throughput run and are not claimed here.")
+    TABLE(doc, ["Condition", "Removed component", "Harness pass rate", "Passed / run"],
           [["Full system", "—", "68%", "17 / 25"],
            ["− RAG", "retrieval grounding", "68%", "17 / 25"],
            ["− Safety", "admissibility validator", "68%", "17 / 25"],
            ["− Reflection", "reflection/diagnostic tools", "50%", "11 / 22"],
            ["LLM only", "all tools", "0%", "0 / 10"]],
-          "Table 7. Component-attribution ablation: measured pass rates per "
-          "condition. Statistical tests are pre-registered; exact p-values await "
-          "full throughput-gated runs.")
+          "Table 7. Component-attribution ablation — HARNESS-VERIFICATION figures "
+          "(mock/smoke run, sub-second per task), NOT live-agent performance and "
+          "inconsistent with the real 24% of Section 7.5; shown only to prove the "
+          "pipeline runs end-to-end. Trustworthy deltas await a full LLM run.")
     H(doc, "7.11 Capability matrix versus Aspen Plus", 2)
     P(doc, "Table 8 operationalises the comparison to Aspen Plus feature by feature. "
       "The platform matches or exceeds Aspen on modern/global and multi-objective "
@@ -783,6 +832,46 @@ def build() -> str:
            ["5", "8/8", "206.2", "2.0"]],
           "Table 11. E-MCTS branching-factor ablation: quality at ceiling, cost "
           "rising (validated rescue problem, 8 seeds, no LLM).")
+    H(doc, "7.14 Multi-method baseline comparison", 2)
+    P(doc, "A multi-method comparison isolates how much of the capability comes "
+      "from the agentic apparatus rather than the bare model (Table 12). The "
+      "honest, measured number for the full tool-using system is its live-benchmark "
+      "pass rate — 24% strict, 31.6% over executed tasks (Section 7.5). A direct "
+      "LLM with no tools cannot operate the simulator at all: with no way to call "
+      "solve or read a stream it can emit plausible text but nothing executable, so "
+      "its effective pass rate is 0%. The qualitative contrast (the tools are "
+      "essential) matches the agentic-vs-end-to-end-LLM finding in the related "
+      "literature. We deliberately do NOT quote the 68% harness-verification "
+      "figure of Section 7.10 here, because it is not live-agent performance. "
+      "External multi-agent frameworks and an expert-manual baseline are listed "
+      "honestly as not evaluated (they require framework integration, human experts "
+      "and further quota); the comparison harness scores any method callable on the "
+      "shared task set, so those rows populate without new code once those "
+      "resources exist.")
+    TABLE(doc, ["Method", "Pass rate", "Source"],
+          [["Full agentic system (this work)", "24% strict / 31.6% executed",
+            "measured — live benchmark (§7.5)"],
+           ["Direct LLM, no tools", "0%", "structural — cannot call the simulator"],
+           ["External frameworks; expert manual", "—", "not evaluated (resource-gated)"]],
+          "Table 12. Multi-method baseline comparison. The capability is in the "
+          "tool-calling loop, not the bare model; the 68% harness figure of "
+          "Section 7.10 is NOT used here as it is not live-agent performance.")
+    H(doc, "7.15 In-context-learning ablation and the pre-design gate", 2)
+    P(doc, "Two further ablation conditions isolate the in-context-learning "
+      "scaffolding in the system prompt: no_cot removes the chain-of-thought "
+      "reasoning block and no_fewshot removes the worked examples (both delimited "
+      "by markers and verified to strip exactly those sections, leaving a normal "
+      "prompt unchanged). Their pass-rate deltas are throughput-gated like the rest "
+      "of the agent ablation, but the mechanism is wired and unit-tested, so the "
+      "component-attribution study spans retrieval, safety, tools, reflection, and "
+      "now the two in-context-learning constructs.")
+    P(doc, "The pre-design thermodynamic gate of Section 5.4 was validated live: a "
+      "methanol/water flowsheet built with the Peng-Robinson equation of state is "
+      "flagged as a property-package mismatch and the gate recommends an "
+      "activity-coefficient model (Modified UNIFAC), while a benzene/toluene "
+      "hydrocarbon build with the same equation of state and a high-pressure "
+      "nitrogen build pass unflagged — the gate catches the wrong-package start "
+      "without false alarms on the appropriate ones.")
 
     # ── 8. Discussion ────────────────────────────────────────────────────────
     H(doc, "8. Discussion")
@@ -927,7 +1016,7 @@ def build() -> str:
     P(doc, "The platform is implemented in Python with a pythonnet bridge to DWSIM "
       "(Windows; DWSIM v8.x/v9.x auto-detected). Optional accelerators (CMA-ES, "
       "pymoo, NLopt, SALib, Pyomo + IPOPT) are import-guarded and degrade to a SciPy "
-      "baseline. The component test suite (564 passing, 1 skipped) runs against a "
+      "baseline. The component test suite (630 passing, 1 skipped) runs against a "
       "mock bridge without a DWSIM installation; live-engine tests auto-skip when "
       "DWSIM is absent. The optimiser-validation, live-DWSIM, multi-variable, "
       "surrogate-EO, model-form-uncertainty, capability-matrix, ablation and "
