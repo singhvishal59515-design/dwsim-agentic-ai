@@ -1,0 +1,5147 @@
+{
+ "success": true,
+ "n_candidates": 176,
+ "n_validated": 50,
+ "n_dropped": 13,
+ "content_hash": "bd7834ca69742c16",
+ "tasks": [
+  {
+   "id": "cooler_methanol_water_90_50_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool a mixture of 50% methanol, 50% water (mol) to 50 \u00b0C and report the result.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "cooler_methanol_water_90_50_ambiguous",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_nitrogen_40_100_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat nitrogen to 100 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_nitrogen_40_100_ambiguous",
+    "compounds": [
+     "Nitrogen"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Nitrogen": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_methane_120_60_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool methane to 60 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_methane_120_60_ambiguous",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "compressor_nitrogen_25_3_ambiguous",
+   "category": "compressor",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Compress nitrogen to 3 bar and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "compressor_nitrogen_25_3_ambiguous",
+    "compounds": [
+     "Nitrogen"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Compressor"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 1.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Nitrogen": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 3,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 170.881,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 3.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_ethanol_water_100_40_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool a mixture of 40% ethanol, 60% water (mol) to 40 \u00b0C and report the result.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "cooler_ethanol_water_100_40_ambiguous",
+    "compounds": [
+     "Ethanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 100,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Ethanol": 0.4,
+       "Water": 0.6
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 40,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 40.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "compressor_methane_25_3_ambiguous",
+   "category": "compressor",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Compress methane to 3 bar and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "compressor_methane_25_3_ambiguous",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Compressor"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 1.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 3,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 133.085,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 3.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_propane_25_80_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat propane to 80 \u00b0C. The feed is propane at 25 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_propane_25_80_full",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_water_25_20_full",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to pump water up to 20 bar. The feed is water at 25 \u00b0C; use the Steam Tables (IAPWS-IF97) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "pump_water_25_20_full",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 20,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.178,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 20.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_benzene_toluene_25_5_full",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to pump a mixture of 50% benzene, 50% toluene (mol) up to 5 bar. The feed is a mixture of 50% benzene, 50% toluene (mol) at 25 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "pump_benzene_toluene_25_5_full",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 5,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.136,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 5.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_co2_90_50_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool carbon dioxide to 50 \u00b0C. The feed is carbon dioxide at 90 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_co2_90_50_full",
+    "compounds": [
+     "Carbon dioxide"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Carbon dioxide": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_propane_120_60_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool propane to 60 \u00b0C. The feed is propane at 120 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_propane_120_60_full",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_nitrogen_120_60_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool nitrogen to 60 \u00b0C. The feed is nitrogen at 120 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_nitrogen_120_60_full",
+    "compounds": [
+     "Nitrogen"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Nitrogen": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_benzene_toluene_90_50_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool a mixture of 50% benzene, 50% toluene (mol) to 50 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_benzene_toluene_90_50_ambiguous",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_water_120_60_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool water to 60 \u00b0C and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "cooler_water_120_60_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_benzene_toluene_40_100_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat a mixture of 50% benzene, 50% toluene (mol) to 100 \u00b0C. The feed is a mixture of 50% benzene, 50% toluene (mol) at 40 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_benzene_toluene_40_100_full",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_benzene_toluene_120_60_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool a mixture of 50% benzene, 50% toluene (mol) to 60 \u00b0C. The feed is a mixture of 50% benzene, 50% toluene (mol) at 120 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_benzene_toluene_120_60_full",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_propane_25_60_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat propane to 60 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_propane_25_60_ambiguous",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_water_40_100_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat water to 100 \u00b0C and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "heater_water_40_100_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_co2_40_100_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat carbon dioxide to 100 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_co2_40_100_ambiguous",
+    "compounds": [
+     "Carbon dioxide"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Carbon dioxide": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "compressor_propane_25_3_ambiguous",
+   "category": "compressor",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Compress propane to 3 bar and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "compressor_propane_25_3_ambiguous",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Compressor"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 1.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 3,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 74.135,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 3.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "compressor_methane_40_8_ambiguous",
+   "category": "compressor",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Compress methane to 8 bar and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "compressor_methane_40_8_ambiguous",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Compressor"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 1.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 8,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 257.501,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 8.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_methanol_water_90_50_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool a mixture of 50% methanol, 50% water (mol) to 50 \u00b0C. The feed is a mixture of 50% methanol, 50% water (mol) at 90 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "cooler_methanol_water_90_50_full",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_methanol_water_25_10_full",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to pump a mixture of 50% methanol, 50% water (mol) up to 10 bar. The feed is a mixture of 50% methanol, 50% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "pump_methanol_water_25_10_full",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 10,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.127,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 10.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_ethanol_water_25_10_full",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to pump a mixture of 40% ethanol, 60% water (mol) up to 10 bar. The feed is a mixture of 40% ethanol, 60% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "pump_ethanol_water_25_10_full",
+    "compounds": [
+     "Ethanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Ethanol": 0.4,
+       "Water": 0.6
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 10,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.143,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 10.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methane_25_80_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat methane to 80 \u00b0C. The feed is methane at 25 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_methane_25_80_full",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_propane_90_50_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool propane to 50 \u00b0C. The feed is propane at 90 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_propane_90_50_full",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_water_25_20_ambiguous",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Pump water up to 20 bar and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "pump_water_25_20_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 20,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.178,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 20.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methane_40_100_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat methane to 100 \u00b0C. The feed is methane at 40 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_methane_40_100_full",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_water_25_80_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat water to 80 \u00b0C. The feed is water at 25 \u00b0C; use the Steam Tables (IAPWS-IF97) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "heater_water_25_80_full",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_propane_40_100_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat propane to 100 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_propane_40_100_ambiguous",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methanol_water_25_80_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat a mixture of 50% methanol, 50% water (mol) to 80 \u00b0C and report the result.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_methanol_water_25_80_ambiguous",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methanol_water_25_60_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat a mixture of 50% methanol, 50% water (mol) to 60 \u00b0C. The feed is a mixture of 50% methanol, 50% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_methanol_water_25_60_full",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_water_25_10_ambiguous",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Pump water up to 10 bar and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "pump_water_25_10_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 10,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.079,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 10.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_water_25_5_ambiguous",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Pump water up to 5 bar and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "pump_water_25_5_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 5,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.03,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 5.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "compressor_propane_25_5_full",
+   "category": "compressor",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to compress propane to 5 bar. The feed is propane at 25 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "compressor_propane_25_5_full",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Compressor"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 1.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 5,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 97.273,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 5.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_co2_120_60_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool carbon dioxide to 60 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_co2_120_60_ambiguous",
+    "compounds": [
+     "Carbon dioxide"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Carbon dioxide": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_ethanol_water_25_80_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat a mixture of 40% ethanol, 60% water (mol) to 80 \u00b0C. The feed is a mixture of 40% ethanol, 60% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_ethanol_water_25_80_full",
+    "compounds": [
+     "Ethanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Ethanol": 0.4,
+       "Water": 0.6
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_methane_90_50_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool methane to 50 \u00b0C. The feed is methane at 90 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_methane_90_50_full",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 90,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 50,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 50.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_ethanol_water_40_100_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat a mixture of 40% ethanol, 60% water (mol) to 100 \u00b0C and report the result.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_ethanol_water_40_100_ambiguous",
+    "compounds": [
+     "Ethanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Ethanol": 0.4,
+       "Water": 0.6
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.275259,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_propane_40_100_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat propane to 100 \u00b0C. The feed is propane at 40 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_propane_40_100_full",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 40,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 100,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 100.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_water_25_60_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat water to 60 \u00b0C and report the result.",
+   "expected_property_package": "Steam Tables (IAPWS-IF97)",
+   "reference_spec": {
+    "name": "heater_water_25_60_ambiguous",
+    "compounds": [
+     "Water"
+    ],
+    "property_package": "Steam Tables (IAPWS-IF97)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Water": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "pump_methanol_water_25_20_full",
+   "category": "pump",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to pump a mixture of 50% methanol, 50% water (mol) up to 20 bar. The feed is a mixture of 50% methanol, 50% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "pump_methanol_water_25_20_full",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Pump"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_pressure",
+      "value": 20,
+      "unit": "bar"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 25.286,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 20.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_ethanol_water_25_60_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat a mixture of 40% ethanol, 60% water (mol) to 60 \u00b0C. The feed is a mixture of 40% ethanol, 60% water (mol) at 25 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_ethanol_water_25_60_full",
+    "compounds": [
+     "Ethanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Ethanol": 0.4,
+       "Water": 0.6
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_methanol_water_100_40_full",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to cool a mixture of 50% methanol, 50% water (mol) to 40 \u00b0C. The feed is a mixture of 50% methanol, 50% water (mol) at 100 \u00b0C; use the NRTL property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "cooler_methanol_water_100_40_full",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 100,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 40,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 40.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_benzene_toluene_25_80_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat a mixture of 50% benzene, 50% toluene (mol) to 80 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_benzene_toluene_25_80_ambiguous",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "cooler_propane_120_60_ambiguous",
+   "category": "cooler",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Cool propane to 60 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "cooler_propane_120_60_ambiguous",
+    "compounds": [
+     "Propane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Cooler"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 120,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Propane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methane_25_60_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat methane to 60 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_methane_25_60_ambiguous",
+    "compounds": [
+     "Methane"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methane": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_methanol_water_25_60_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat a mixture of 50% methanol, 50% water (mol) to 60 \u00b0C and report the result.",
+   "expected_property_package": "NRTL",
+   "reference_spec": {
+    "name": "heater_methanol_water_25_60_ambiguous",
+    "compounds": [
+     "Methanol",
+     "Water"
+    ],
+    "property_package": "NRTL",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Methanol": 0.5,
+       "Water": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 60,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 60.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_co2_25_80_ambiguous",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "ambiguous",
+   "prompt": "Heat carbon dioxide to 80 \u00b0C and report the result.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_co2_25_80_ambiguous",
+    "compounds": [
+     "Carbon dioxide"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Carbon dioxide": 1.0
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 1.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  },
+  {
+   "id": "heater_benzene_toluene_25_80_full",
+   "category": "heater",
+   "complexity": 1,
+   "detail_level": "full",
+   "prompt": "Build a flowsheet to heat a mixture of 50% benzene, 50% toluene (mol) to 80 \u00b0C. The feed is a mixture of 50% benzene, 50% toluene (mol) at 25 \u00b0C; use the Peng-Robinson (PR) property package. Solve it and report the outlet stream conditions.",
+   "expected_property_package": "Peng-Robinson (PR)",
+   "reference_spec": {
+    "name": "heater_benzene_toluene_25_80_full",
+    "compounds": [
+     "Benzene",
+     "Toluene"
+    ],
+    "property_package": "Peng-Robinson (PR)",
+    "objects": [
+     {
+      "tag": "Feed",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "U",
+      "type": "Heater"
+     },
+     {
+      "tag": "Out",
+      "type": "MaterialStream"
+     },
+     {
+      "tag": "Q",
+      "type": "EnergyStream"
+     }
+    ],
+    "connections": [
+     {
+      "from_tag": "Feed",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "U",
+      "to_tag": "Out",
+      "from_port": 0,
+      "to_port": 0
+     },
+     {
+      "from_tag": "Q",
+      "to_tag": "U",
+      "from_port": 0,
+      "to_port": 1
+     }
+    ],
+    "feed_specs": [
+     {
+      "tag": "Feed",
+      "temperature": 25,
+      "temperature_unit": "C",
+      "pressure": 2.0,
+      "pressure_unit": "bar",
+      "massflow": 1.0,
+      "massflow_unit": "kg/s",
+      "composition": {
+       "Benzene": 0.5,
+       "Toluene": 0.5
+      }
+     }
+    ],
+    "unit_op_specs": [
+     {
+      "tag": "U",
+      "property_name": "outlet_temperature",
+      "value": 80,
+      "unit": "C"
+     }
+    ]
+   },
+   "success_criteria": [
+    {
+     "stream": "Out",
+     "property": "temperature_C",
+     "expected": 80.0,
+     "tolerance_pct": 2.0
+    },
+    {
+     "stream": "Out",
+     "property": "pressure_bar",
+     "expected": 2.0,
+     "tolerance_pct": 1.0
+    },
+    {
+     "stream": "Out",
+     "property": "vapor_fraction",
+     "expected": 0.0,
+     "tolerance_pct": 0.0
+    },
+    {
+     "stream": "Out",
+     "property": "mass_flow_kg_s",
+     "expected": 1.0,
+     "tolerance_pct": 1.0
+    }
+   ],
+   "provenance": "programmatically generated, engine-validated"
+  }
+ ]
+}

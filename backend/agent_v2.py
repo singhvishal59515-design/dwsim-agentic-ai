@@ -1021,6 +1021,7 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
       CSTR, PFR, GibbsReactor, ConversionReactor, EquilibriumReactor
       Pipe, CompoundSeparator
 
+    <<ICL:FEWSHOT>>
     EXAMPLE — Water heater (25°C → 80°C, 1 atm, 1 kg/s, Steam Tables):
       new_flowsheet {name:"water_heater", compounds:["Water"],
                      property_package:"Steam Tables (IAPWS-IF97)"}
@@ -1038,6 +1039,7 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
       set_unit_op_property {tag:"H-101", property_name:"OutletTemperature", value:353.15}
       set_unit_op_property {tag:"H-101", property_name:"DeltaP",            value:0}
       save_and_solve {}
+    <<ICL:/FEWSHOT>>
 
     PHASE-SPECIFIC RESULTS (v5)
     ────────────────────────────
@@ -1212,6 +1214,7 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     4. Then proceed: new_flowsheet → add_object → connect_streams →
        set_stream_property → save_and_solve.
 
+    <<ICL:COT>>
     STRUCTURED REASONING FOR PROCESS ENGINEERING
     ──────────────────────────────────────────────
     For any simulation task, reason in this order:
@@ -1224,6 +1227,7 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
     4. OPTIMISATION: Only after the base case converges, explore
        parametric variations or call bayesian_optimize.
     State each step explicitly in your response.
+    <<ICL:/COT>>
 
     DISTILLATION COLUMN INITIALIZATION
     ────────────────────────────────────
@@ -1332,6 +1336,21 @@ BASE_SYSTEM_PROMPT = textwrap.dedent("""
 """).strip()
 
 
+def _strip_icl(prompt: str, disable_cot: bool = False,
+               disable_fewshot: bool = False) -> str:
+    """ICL ablation (Tian et al. Table 4): when a toggle is set, remove the
+    marker-delimited few-shot worked examples (<<ICL:FEWSHOT>>…) or
+    chain-of-thought reasoning block (<<ICL:COT>>…). The bare <<ICL:…>> markers
+    are ALWAYS stripped, so a normal (un-ablated) prompt equals the unmarked
+    original."""
+    import re
+    for tag, drop in (("FEWSHOT", disable_fewshot), ("COT", disable_cot)):
+        if drop:
+            prompt = re.sub(r"[ \t]*<<ICL:%s>>.*?<<ICL:/%s>>[ \t]*\n?" % (tag, tag),
+                            "", prompt, flags=re.DOTALL)
+    return re.sub(r"[ \t]*<<ICL:/?(?:FEWSHOT|COT)>>[ \t]*\n?", "", prompt)
+
+
 def _build_system_prompt(bridge: DWSIMBridgeV2,
                          state_delta: Optional[str] = None,
                          user_message: str = "") -> str:
@@ -1343,6 +1362,17 @@ def _build_system_prompt(bridge: DWSIMBridgeV2,
     # uncached suffix — exactly what we want.
     prompt  = BASE_SYSTEM_PROMPT.replace(
         "{flowsheet_context}", CACHE_BREAKPOINT + context)
+
+    # ICL ablation (Tian et al. Table 4): strip few-shot examples / CoT reasoning
+    # under the no_fewshot / no_cot conditions. This ALWAYS runs so the bare
+    # <<ICL:…>> markers never leak into a live prompt; the toggles are False in
+    # normal operation, leaving the content intact.
+    try:
+        from ablation_config import ablation as _abl_icl
+        prompt = _strip_icl(prompt, disable_cot=_abl_icl.disable_cot,
+                            disable_fewshot=_abl_icl.disable_fewshot)
+    except Exception:
+        prompt = _strip_icl(prompt)
 
     if state_delta:
         prompt = prompt + "\n\nFLOWSHEET STATE SINCE LAST TURN\n" \
