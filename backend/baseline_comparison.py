@@ -10,10 +10,13 @@ expert manual design, on one rubric (five dimensions + overall S + SCR + time).
 This harness assembles the same kind of table honestly, from what the project can
 actually run:
 
-  • REAL rows from the project's ablation run (ablation_results.json): the full
-    agentic system vs a direct LLM with no tools — exactly the "Ours vs
-    end-to-end LLM" contrast in Tian's Table 1. The full system's tool-calling +
-    convergence loop is what separates it from a bare model.
+  • REAL rows measured on the project's live 25-task benchmark: the full agentic
+    system at its real pass rate (24% strict) vs a direct LLM with no tools, which
+    is structurally 0% (it cannot call solve or read a stream) — the "Ours vs
+    end-to-end LLM" contrast in Tian's Table 1. NOTE: we do NOT use the
+    component-ablation pass rates (68%); those are a smoke-run pipeline check
+    (sub-second per task, no LLM/solver executed) and contradict the live
+    benchmark, so treating them as measured performance would be wrong.
   • A generic LIVE runner that scores any set of method callables on the shared
     25-task set, using process_evaluation (the 5-dimension rubric, Tian Eq. 1) +
     the SCR + wall time. Fully unit-tested with mock methods; populating it with
@@ -66,32 +69,37 @@ _ABLATION_TO_METHOD = {
 }
 
 
-def from_ablation_results(path: Optional[str] = None) -> List[MethodResult]:
-    path = path or os.path.join(_HERE, "ablation_results.json")
-    if not os.path.isfile(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            table = json.load(f).get("comparison_table") or []
-    except Exception:
-        return []
-    out: List[MethodResult] = []
-    for row in table:
-        cond = row.get("condition")
-        if cond in _ABLATION_TO_METHOD:
-            # The ablation's avg_time_s is a wired smoke-run value (~ms), not a
-            # real agent wall-clock (~30-90 s/task), so it is NOT surfaced as a
-            # timing — only the measured pass rate is carried over.
-            t = row.get("avg_time_s")
-            mean_time = t if isinstance(t, (int, float)) and t >= 1.0 else None
-            note = "measured pass rate from the project's ablation run"
-            if mean_time is None:
-                note += "; wall-time awaits a fresh timed run"
-            out.append(MethodResult(
-                name=_ABLATION_TO_METHOD[cond], source="ablation_run",
-                n_tasks=row.get("n_run"), pass_rate_pct=row.get("pass_rate"),
-                mean_time_s=mean_time, note=note))
-    return out
+def real_method_rows(path: Optional[str] = None) -> List[MethodResult]:
+    """The two methods this project can HONESTLY report: the full agentic system
+    at its real live-benchmark pass rate, and a direct LLM with no tools which is
+    structurally unable to operate the simulator (0%).
+
+    We deliberately do NOT use the component-ablation pass rates here: those are a
+    smoke-run pipeline check (sub-second per task — no LLM or solver executed) and
+    contradict the live benchmark (they report the full system at 68% where the
+    live benchmark measures 24%). Using them would misrepresent performance."""
+    path = path or os.path.join(_HERE, "benchmark_results.json")
+    strict = executed = None
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            from benchmark_error_analysis import analyze
+            a = analyze(data.get("results", data))
+            strict, executed = a["strict_pass_rate_pct"], a["executed_pass_rate_pct"]
+        except Exception:
+            pass
+    note = (f"measured on the live 25-task benchmark: {strict}% strict, "
+            f"{executed}% over executed tasks" if strict is not None
+            else "measured on the live 25-task benchmark")
+    return [
+        MethodResult(name="Full agentic system (this work)", source="measured",
+                     n_tasks=25, pass_rate_pct=strict, note=note),
+        MethodResult(name="Direct LLM, no tools (end-to-end baseline)",
+                     source="structural", pass_rate_pct=0.0,
+                     note="structural — with no tools it cannot call solve or "
+                          "read a stream, so nothing executes"),
+    ]
 
 
 # ── honest placeholders for baselines out of reach here ──────────────────────
@@ -143,7 +151,7 @@ def run_live_comparison(
 def compare(live: Optional[List[MethodResult]] = None) -> List[MethodResult]:
     rows: List[MethodResult] = []
     rows.extend(live or [])
-    rows.extend(from_ablation_results())
+    rows.extend(real_method_rows())
     rows.extend(external_baseline_placeholders())
     return rows
 
@@ -156,17 +164,21 @@ def to_markdown(rows: List[MethodResult]) -> str:
     w("A multi-method comparison in the structure of Tian et al. "
       "(arXiv:2601.06776, 2026), Table 1, assembled from what this project can "
       "actually measure. The headline contrast — a full tool-using agentic system "
-      "versus a direct LLM with no tools — is real, from the project's ablation "
-      "run; external frameworks and the expert baseline are listed honestly as "
-      "not evaluated, with the reason.")
+      "versus a direct LLM with no tools — uses the REAL live 25-task benchmark "
+      "(24% strict) for the full system and a structural 0% for the tool-less LLM. "
+      "We deliberately do NOT use the component-ablation pass rates (68%): those "
+      "are a smoke-run pipeline check, not live-agent performance, and contradict "
+      "the live benchmark. External frameworks and the expert baseline are listed "
+      "honestly as not evaluated, with the reason.")
     w("")
     w("| Method | Pass rate | SCR | Mean time (s) | Source |")
     w("|---|--:|--:|--:|---|")
     def fmt(v, suffix=""):
         return f"{v:g}{suffix}" if isinstance(v, (int, float)) else "—"
     for r in rows:
-        src = {"ablation_run": "ablation run", "live": "live run",
-               "not_evaluated": "not evaluated"}[r.source]
+        src = {"measured": "measured (live benchmark)", "structural": "structural",
+               "live": "live run", "not_evaluated": "not evaluated",
+               "ablation_run": "ablation run"}.get(r.source, r.source)
         w(f"| {r.name} | {fmt(r.pass_rate_pct, '%')} | {fmt(r.scr_pct, '%')} "
           f"| {fmt(r.mean_time_s)} | {src} |")
     w("")
@@ -183,13 +195,16 @@ def to_markdown(rows: List[MethodResult]) -> str:
               " | ".join(f"{r.dims_100.get(d, float('nan')):.1f}" for d in DIMENSIONS) +
               " |")
         w("")
-    w("**Reading.** The full agentic system reaches a 68% pass rate where the "
-      "direct LLM with no tools reaches 0% — the entire capability comes from the "
-      "tool-calling + convergence loop, not the bare model, which is exactly the "
-      "gap Tian et al. report between their system and an end-to-end LLM. Fresh "
-      "rubric-scored runs and the external-framework rows are throughput-gated; "
-      "the harness scores any method callable on the shared 25-task set so those "
-      "rows populate without new code when quota is available.")
+    w("**Reading.** On the live 25-task benchmark the full agentic system reaches "
+      "24% strict (31.6% over executed tasks) where a direct LLM with no tools "
+      "reaches 0% — with no tools it cannot operate the simulator at all. The "
+      "entire capability comes from the tool-calling + convergence loop, not the "
+      "bare model, which is the gap Tian et al. report between their system and an "
+      "end-to-end LLM. (The 68% component-ablation figure is NOT used here: it is a "
+      "smoke-run pipeline check, not live-agent performance, and contradicts this "
+      "benchmark.) Fresh rubric-scored runs and the external-framework rows are "
+      "throughput-gated; the harness scores any method callable on the shared "
+      "25-task set so those rows populate without new code when quota is available.")
     w("")
     w("**Not evaluated, and why:**")
     for r in rows:

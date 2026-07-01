@@ -21,9 +21,11 @@ Tian et al.'s Table 3 sweeps the E-MCTS branching factor and finds quality (SCR)
 
 ## B. Component-attribution ablation
 
-Each condition removes one capability from the full system and re-runs the a-priori task set (Tian et al. ablate the Task-Understanding agent and E-MCTS; we ablate retrieval, the safety validator, the reflection/diagnostic tools, and — most severely — all tools). Pass-rates are measured; the inferential statistics (Kruskal–Wallis → Mann–Whitney U + Holm → Cohen's d) are wired and throughput-gated.
+Each condition removes one capability from the full system (retrieval, the safety validator, the reflection/diagnostic tools, and — most severely — all tools), analysed with the pipeline of Section 6.3 (Kruskal–Wallis → Mann–Whitney U + Holm → Cohen's d).
 
-| Condition | Pass rate | Passed / run |
+**Status caveat (important).** The ablation harness is wired and verified end-to-end without quota (a mock-agent round-trip plus a live smoke run), but the full ablation with the real LLM has NOT been run — it is throughput-gated. The figures below are therefore a PIPELINE CHECK, not live-agent performance: their sub-second per-task times show no LLM or solver executed, and they are inconsistent with the real full-system live benchmark of 24% strict (Part C). They are shown only to evidence the harness runs end-to-end and yields deltas in the expected direction; the trustworthy component-attribution numbers await a full-throughput run.
+
+| Condition | Harness pass rate (not live-agent) | Passed / run |
 |---|--:|--:|
 | Full System | 68% | 17 / 25 |
 | No RAG | 68% | 17 / 25 |
@@ -31,7 +33,7 @@ Each condition removes one capability from the full system and re-runs the a-pri
 | No Reflection Tools | 50% | 11 / 22 |
 | Direct LLM (No Tools) | 0% | 0 / 10 |
 
-**Reading.** Removing all tools collapses the pass-rate to 0% and removing the reflection tools drops it to 50%, while removing retrieval grounding or the safety validator leaves it unchanged on this task set — evidence that the tool-calling action space and the reflection tools are load-bearing, while grounding and safety act as guardrails whose value is qualitative (avoiding unsafe/unsupported answers) rather than pass-rate-changing here. This mirrors Tian et al.'s finding that removing E-MCTS and the Task-Understanding agent each degrade the run.
+**Reading (directional only).** In the harness check, removing all tools collapses the run to 0% and removing the reflection tools lowers it, while removing retrieval grounding or the safety validator leaves it unchanged — directionally consistent with the tool-calling action space being load-bearing and grounding/safety acting as guardrails, but the magnitudes are not measured performance and must not be read as such.
 
 Two further in-context-learning conditions are wired (Tian et al. Table 4): **no_cot** strips the chain-of-thought reasoning block and **no_fewshot** strips the worked examples from the system prompt (toggled by `DWSIM_ABLATION_CONDITION`; verified to remove exactly those sections). Their pass-rate deltas are throughput-gated like the rest of the agent ablation.
 
@@ -57,7 +59,7 @@ Designs are scored on five weighted dimensions — economic 0.35, environmental 
 
 ## E. Multi-method baseline comparison
 
-A Tian-Table-1-style comparison of the full agentic system against a direct LLM with no tools (the project's measured end-to-end-LLM equivalent): 68% vs 0% pass rate — the capability comes from the tool-calling + convergence loop, not the bare model. External multi-agent frameworks (Swarm, AutoGen, CrewAI, MetaGPT) and the expert-manual baseline are listed honestly as not evaluated, each with its reason; the harness scores any method callable on the shared task set, so those rows populate without new code when quota is available. Full table in BASELINE_COMPARISON.md.
+A Tian-Table-1-style comparison of the full agentic system against a direct LLM with no tools: on the live 25-task benchmark the full system reaches 24% strict (31.6% over executed tasks) versus a structural 0% for the tool-less LLM (which cannot call solve or read a stream) — the capability comes from the tool-calling + convergence loop, not the bare model. (We do NOT use the 68% component-ablation figure of Part B here: it is a smoke-run pipeline check, not live-agent performance.) External multi-agent frameworks (Swarm, AutoGen, CrewAI, MetaGPT) and the expert-manual baseline are listed honestly as not evaluated, each with its reason; the harness scores any method callable on the shared task set, so those rows populate without new code when quota is available. Full table in BASELINE_COMPARISON.md.
 
 ---
 _Related artifacts: BASELINE_COMPARISON.md, BENCHMARK_ERROR_ANALYSIS.md, DESIGN_SEARCH_VALIDATION.md, DISTILLATION_TAC_CASE_STUDY.md, ABLATION_PROTOCOL.md._
