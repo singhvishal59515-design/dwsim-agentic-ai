@@ -29,13 +29,27 @@
 
 ## 3. Formal benchmark suite
 
-Pass-rate: **24% (6/25)** across 25 tasks (mode: **live**).
+Pass-rate: **24% (6/25)** across 25 tasks (mode: **live**); **32%** over the 19 tasks
+that executed. Six tasks never ran (LLM rate-limiting) and are **inconclusive,
+not failed**.
+
+> **Convergence — read this before quoting a "100%" figure.** The `100% (68/68)`
+> in §2 is the **mock** hydrogen study and `100% (78/78)` in §1 is **session
+> completion** (explicitly *not* a correctness measure). **Neither is the live
+> 25-task benchmark's solver convergence** — do not conflate them. The
+> per-task `convergence` field in `benchmark_results.json` was previously an
+> unreliable default (`True if stream_results else None`, which read `True` even
+> for tasks that never executed) and **cannot support a "100% solver convergence"
+> claim**. The harness now records the real per-task flag
+> (`bridge.check_convergence` → `all_converged`, `None` for not-run tasks); a
+> trustworthy live-benchmark convergence figure therefore awaits a re-run with
+> the corrected harness.
 
 Generate/refresh with `python run_benchmark_live.py` against a live DWSIM + LLM key.
 
 ## 4. Component-level correctness (unit tests)
 
-`pytest -q` from `backend/`: **465 passed, 1 skipped** at time of writing (mock bridge/agent; live-DWSIM tests auto-skip). This validates the software components, not end-to-end task success against real DWSIM.
+`pytest -q` from `backend/`: **564 passed, 1 skipped** at time of writing (mock bridge/agent; live-DWSIM tests auto-skip). This validates the software components, not end-to-end task success against real DWSIM.
 
 ## 5. Honest verdict
 
